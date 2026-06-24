@@ -293,13 +293,26 @@ final class HttpServer implements HttpServerInterface
             $this->streamingRequests
         );
 
+        $onWorkerError = function (\Throwable $e): void {
+            $this->log(\sprintf(
+                "CRITICAL: Worker Task Failed!\n" .
+                    "Exception: %s\n" .
+                    "Message: %s\n" .
+                    "Stack Trace:\n%s\n",
+                get_class($e),
+                $e->getMessage(),
+                $e->getTraceAsString()
+            ));
+        };
+
         for ($i = 0; $i < $workers; $i++) {
-            $pool->run($workerTask)->catch(fn() => null);
+            $pool->run($workerTask)->catch($onWorkerError);
         }
 
-        $pool->onWorkerRespawn(function ($pool) use ($workerTask) {
+        $pool->onWorkerRespawn(function ($pool) use ($workerTask, $onWorkerError) {
             $this->log('ALERT: Worker process died or retired! Respawning replacement worker...');
-            $pool->run($workerTask)->catch(fn() => null);
+
+            $pool->run($workerTask)->catch($onWorkerError);
 
             Loop::nextTick(function () use ($pool) {
                 $pids = $pool->getWorkerPids();
