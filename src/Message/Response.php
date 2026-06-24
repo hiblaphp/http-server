@@ -121,15 +121,15 @@ final class Response implements ResponseInterface
      */
     public static function json(mixed $data, int $status = 200): self
     {
-        $json = \json_encode(
+        $json = json_encode(
             $data,
             \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION
         );
 
-        if (!\is_string($json)) {
+        if (! \is_string($json)) {
             throw new \InvalidArgumentException(
-                'Unable to encode given data as JSON: ' . \json_last_error_msg(),
-                \json_last_error()
+                'Unable to encode given data as JSON: ' . json_last_error_msg(),
+                json_last_error()
             );
         }
 

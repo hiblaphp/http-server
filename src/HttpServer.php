@@ -17,6 +17,8 @@ use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\Interfaces\ServerInterface;
 use Hibla\Socket\SocketServer;
 
+use function Hibla\asyncFn;
+
 /**
  * Concrete implementation of the fluent, clustered HTTP Server.
  *
@@ -260,7 +262,7 @@ final class HttpServer implements HttpServerInterface
         Loop::run();
     }
 
-   /**
+    /**
      * Run the server in clustered mode across multiple CPU cores.
      */
     private function runCluster(int $workers, callable $requestHandler): void
@@ -271,7 +273,6 @@ final class HttpServer implements HttpServerInterface
         if (! isset($context['tcp']) || ! \is_array($context['tcp'])) {
             $context['tcp'] = [];
         }
-        
         $context['tcp']['so_reuseport'] = true;
 
         $workerTask = new ServerWorkerTask(
@@ -282,13 +283,19 @@ final class HttpServer implements HttpServerInterface
             $this->streamingRequests
         );
 
-        $onWorkerError = function (\Throwable $e): void {
-            $this->log(sprintf(
+        $isShuttingDown = false;
+
+        $onWorkerError = function (\Throwable $e) use (&$isShuttingDown): void {
+            if ($isShuttingDown) {
+                return;
+            }
+
+            $this->log(\sprintf(
                 "CRITICAL: Worker Task Failed!\n" .
                 "Exception: %s\n" .
                 "Message: %s\n" .
                 "Stack Trace:\n%s\n",
-                get_class($e),
+                \get_class($e),
                 $e->getMessage(),
                 $e->getTraceAsString()
             ));
@@ -306,7 +313,7 @@ final class HttpServer implements HttpServerInterface
 
         $pool = $pool->onWorkerRespawn(function ($pool) use ($workerTask, $onWorkerError) {
             $this->log('ALERT: Worker process died or retired! Respawning replacement worker...');
-            
+
             $pool->run($workerTask)->catch($onWorkerError);
 
             Loop::nextTick(function () use ($pool) {
@@ -322,11 +329,13 @@ final class HttpServer implements HttpServerInterface
             $pool->run($workerTask)->catch($onWorkerError);
         }
 
-        $this->setupSignalHandlers(function () use ($pool) {
+        $this->setupSignalHandlers(asyncFn(function () use ($pool, &$isShuttingDown) {
+            $isShuttingDown = true;
+
             $this->log("\nGracefully shutting down cluster...");
             $pool->drain();
             Loop::stop();
-        });
+        }));
 
         $this->log("HTTP Server listening on {$this->uri} (Cluster Mode: {$workers} Workers)");
         $this->log('Active Worker PIDs: ' . implode(', ', $pids));
