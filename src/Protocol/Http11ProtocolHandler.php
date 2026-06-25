@@ -6,8 +6,8 @@ namespace Hibla\HttpServer\Protocol;
 
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Message\RequestBodyStream;
+use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 
 class Http11ProtocolHandler implements ProtocolHandlerInterface

@@ -285,15 +285,16 @@ final class HttpServer implements HttpServerInterface
         $isShuttingDown = false;
 
         $onWorkerError = function (\Throwable $e) use (&$isShuttingDown): void {
+            /** @phpstan-ignore-next-line */
             if ($isShuttingDown) {
                 return;
             }
 
             $this->log(\sprintf(
                 "CRITICAL: Worker Task Failed!\n" .
-                "Exception: %s\n" .
-                "Message: %s\n" .
-                "Stack Trace:\n%s\n",
+                    "Exception: %s\n" .
+                    "Message: %s\n" .
+                    "Stack Trace:\n%s\n",
                 \get_class($e),
                 $e->getMessage(),
                 $e->getTraceAsString()
@@ -349,7 +350,7 @@ final class HttpServer implements HttpServerInterface
         }
     }
 
-    private function setupSignalHandlers(\Closure $onShutdown): void
+    private function setupSignalHandlers(callable $onShutdown): void
     {
         try {
             $handler = static function (int $signal) use ($onShutdown) {
