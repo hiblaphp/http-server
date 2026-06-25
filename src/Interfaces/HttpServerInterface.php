@@ -106,6 +106,17 @@ interface HttpServerInterface
     public function withStreamingRequests(bool $enable = true): static;
 
     /**
+     * Set the maximum number of concurrent connections allowed per worker process.
+     *
+     * @param int $limit Maximum number of connections.
+     * @param bool $pauseOnLimit If true, the server stops accepting new connections
+     *                           (backpressure) when full. If false, it accepts and drops them.
+     *
+     * @return static A new instance with the connection limit configured.
+     */
+    public function withMaxConnections(int $limit, bool $pauseOnLimit = true): static;
+
+    /**
      * Start the HTTP Server and block the current thread to process incoming requests.
      *
      * @param callable $requestHandler Callback invoked for each incoming request.

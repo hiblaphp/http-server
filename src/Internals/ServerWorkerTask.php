@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Hibla\HttpServer\Internals;
 
 use Hibla\HttpServer\HttpServer;
+use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
 
 /**
@@ -26,13 +27,23 @@ final class ServerWorkerTask
         private readonly array $context,
         private readonly mixed $requestHandler,
         private readonly int $maxBodySize = 10485760,
-        private readonly bool $streamingRequests = false
+        private readonly bool $streamingRequests = false,
+        private readonly ?int $connectionLimit = null,
+        private readonly bool $pauseOnLimit = true
     ) {
     }
 
     public function __invoke(): void
     {
         $socket = new SocketServer($this->uri, $this->context);
+
+        if ($this->connectionLimit !== null) {
+            $socket = new LimitingServer(
+                $socket,
+                $this->connectionLimit,
+                $this->pauseOnLimit
+            );
+        }
 
         HttpServer::attachProtocolHandler(
             $socket,

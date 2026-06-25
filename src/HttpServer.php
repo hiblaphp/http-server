@@ -14,6 +14,7 @@ use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Parallel\Parallel;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\Interfaces\ServerInterface;
+use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
 
 use function Hibla\asyncFn;
@@ -36,6 +37,10 @@ final class HttpServer implements HttpServerInterface
     private bool $clusterEnabled = false;
 
     private int $workerCount = 1;
+
+    private ?int $connectionLimit = null;
+
+    private bool $pauseOnLimit = true;
 
     private bool $loggingEnabled = true;
 
@@ -206,6 +211,15 @@ final class HttpServer implements HttpServerInterface
         return $clone;
     }
 
+    public function withMaxConnections(int $limit, bool $pauseOnLimit = true): static
+    {
+        $clone = clone $this;
+        $clone->connectionLimit = $limit;
+        $clone->pauseOnLimit = $pauseOnLimit;
+
+        return $clone;
+    }
+
     /**
      * {@inheritdoc}
      */
@@ -249,6 +263,15 @@ final class HttpServer implements HttpServerInterface
     private function runSingleProcess(callable $requestHandler): void
     {
         $socket = new SocketServer($this->uri, $this->context);
+
+        if ($this->connectionLimit !== null) {
+            $socket = new LimitingServer(
+                $socket,
+                $this->connectionLimit,
+                $this->pauseOnLimit
+            );
+        }
+
         self::attachProtocolHandler($socket, $requestHandler, $this->maxBodySize, $this->streamingRequests);
 
         $this->setupSignalHandlers(function () use ($socket) {
@@ -279,7 +302,9 @@ final class HttpServer implements HttpServerInterface
             $context,
             $requestHandler,
             $this->maxBodySize,
-            $this->streamingRequests
+            $this->streamingRequests,
+            $this->connectionLimit,
+            $this->pauseOnLimit
         );
 
         $isShuttingDown = false;
