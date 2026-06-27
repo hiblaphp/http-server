@@ -297,10 +297,12 @@ it('automatically sends a 100 Continue response when the Expect header is presen
     $handler->handleData($rawHeaders);
 
     expect($writtenBuffer)->toBe("HTTP/1.1 100 Continue\r\n\r\n")
-        ->and($parsedRequest)->toBeNull();
+        ->and($parsedRequest)->toBeNull()
+    ;
 
-    $handler->handleData("hello world");
+    $handler->handleData('hello world');
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getBody())->toBe('hello world');
+        ->and($parsedRequest->getBody())->toBe('hello world')
+    ;
 });

@@ -6,40 +6,12 @@ use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
-use Hibla\Socket\Interfaces\ConnectionInterface;
-
-/**
- * RFC 9112 Gap Tests Round 3
- *
- * These tests target edge cases and security vectors identified in the third round
- * of RFC 9112 auditing (TE/CL connection closure, strict chunk-size hex validation, 
- * TE chain status codes, Host header list injection, and control character validation).
- */
-
-function mockConnection3(string &$buffer, bool $expectClose = false): ConnectionInterface
-{
-    $connection = Mockery::mock(ConnectionInterface::class);
-    $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
-    $connection->shouldReceive('write')->andReturnUsing(function (string $data) use (&$buffer) {
-        $buffer .= $data;
-
-        return true;
-    });
-
-    if ($expectClose) {
-        $connection->shouldReceive('close')->once();
-    } else {
-        $connection->shouldReceive('close')->zeroOrMoreTimes();
-    }
-
-    return $connection;
-}
 
 describe('RFC 9112 section 7.1 — Strict Chunk Size Parsing', function () {
 
     it('rejects a chunk size containing non-hex characters (e.g., 5Z) to prevent TE.TE smuggling', function () {
         $buffer = '';
-        $connection = mockConnection3($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -50,7 +22,7 @@ describe('RFC 9112 section 7.1 — Strict Chunk Size Parsing', function () {
             . "Host: localhost\r\n"
             . "Transfer-Encoding: chunked\r\n"
             . "\r\n"
-            . "5Z\r\nhello\r\n0\r\n\r\n"; // "5Z" is invalid hex, PHP's hexdec() evaluates it as 5
+            . "5Z\r\nhello\r\n0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -65,7 +37,7 @@ describe('RFC 9112 section 6.1 — TE and Content-Length mandatory connection cl
 
     it('forces connection closure when both Transfer-Encoding and Content-Length are present', function () {
         $buffer = '';
-        $connection = mockConnection3($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
             $protocol->writeResponse(new Response(200, [], 'OK'));
@@ -89,7 +61,7 @@ describe('RFC 9112 section 6.3 — Transfer-Encoding final coding status code', 
 
     it('responds with 400 Bad Request (not 501 Not Implemented) if the TE chain does not end in chunked', function () {
         $buffer = '';
-        $connection = mockConnection3($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -98,7 +70,7 @@ describe('RFC 9112 section 6.3 — Transfer-Encoding final coding status code', 
 
         $raw = "POST / HTTP/1.1\r\n"
             . "Host: localhost\r\n"
-            . "Transfer-Encoding: chunked, gzip\r\n" 
+            . "Transfer-Encoding: chunked, gzip\r\n"
             . "\r\n";
 
         $handler->handleData($raw);
@@ -115,14 +87,13 @@ describe('RFC 9112 section 3.2 — Host Header list injection', function () {
 
     it('rejects a comma-separated Host header field to prevent routing bypass attacks', function () {
         $buffer = '';
-        $connection = mockConnection3($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
             $requestReached = true;
         });
 
-        // The array count is 1, but the value is invalid.
         $handler->handleData("GET / HTTP/1.1\r\nHost: a.com, b.com\r\n\r\n");
 
         expect($buffer)->toContain('HTTP/1.1 400 Bad Request')
@@ -136,7 +107,7 @@ describe('RFC 9112 section 3.1 & 5.5 — Token and VCHAR strictness', function (
 
     it('rejects a request method containing illegal control characters', function () {
         $buffer = '';
-        $connection = mockConnection3($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -153,7 +124,7 @@ describe('RFC 9112 section 3.1 & 5.5 — Token and VCHAR strictness', function (
 
     it('rejects a header field value containing illegal control characters', function () {
         $buffer = '';
-        $connection = mockConnection3($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {

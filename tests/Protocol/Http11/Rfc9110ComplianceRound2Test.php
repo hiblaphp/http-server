@@ -4,42 +4,12 @@ declare(strict_types=1);
 
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
-use Hibla\Socket\Interfaces\ConnectionInterface;
-
-/**
- * RFC 9112 Gap Tests Round 2
- *
- * These target the specific conformance gaps found during the deep-dive audit
- * (TE/CL precedence beyond the literal "chunked" case, Content-Length value
- * validation, bare-CR handling, and the header-size-bypass-on-single-read bug).
- * Several of these are EXPECTED TO FAIL against the current implementation —
- * that's the point. Fix the implementation, not the assertions.
- */
-
-function mockConnection2(string &$buffer, bool $expectClose = false): ConnectionInterface
-{
-    $connection = Mockery::mock(ConnectionInterface::class);
-    $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
-    $connection->shouldReceive('write')->andReturnUsing(function (string $data) use (&$buffer) {
-        $buffer .= $data;
-
-        return true;
-    });
-
-    if ($expectClose) {
-        $connection->shouldReceive('close')->once();
-    } else {
-        $connection->shouldReceive('close')->zeroOrMoreTimes();
-    }
-
-    return $connection;
-}
 
 describe('RFC 9112 section 6.1/6.3 — Transfer-Encoding precedence beyond literal "chunked"', function () {
 
     it('does not fall back to Content-Length framing when Transfer-Encoding names an unrecognized/non-chunked coding', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -62,7 +32,7 @@ describe('RFC 9112 section 6.1/6.3 — Transfer-Encoding precedence beyond liter
 
     it('strips Content-Length even when Transfer-Encoding resolves to something other than chunked', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer);
+        $connection = mockConnection($buffer);
 
         $parsedRequest = null;
         $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$parsedRequest) {
@@ -91,7 +61,7 @@ describe('RFC 9112 section 6.3 / RFC 9110 section 8.6 — Content-Length value v
 
     it('rejects a Content-Length value containing non-digit characters', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -107,7 +77,7 @@ describe('RFC 9112 section 6.3 / RFC 9110 section 8.6 — Content-Length value v
 
     it('rejects a negative Content-Length value instead of silently treating the request as bodyless', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -127,7 +97,7 @@ describe('RFC 9112 section 2.2 — Bare CR handling', function () {
 
     it('rejects a header field value containing a bare CR not followed by LF', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -147,7 +117,7 @@ describe('RFC 9112 section 5.1 — malformed field-line grammar', function () {
 
     it('rejects a header line with no colon at all rather than silently skipping it', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -167,7 +137,7 @@ describe('RFC 9112 section 2.2 / section 3 — Header size enforcement must not 
 
     it('rejects oversized headers even when the full header block (with terminator) arrives in a single read', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer, expectClose: true);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestReached = false;
         $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
@@ -190,7 +160,7 @@ describe('RFC 9112 section 7.1 — chunk-size line has no size bound', function 
 
     it('eventually rejects an absurdly long chunk-size line instead of buffering it indefinitely', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer);
+        $connection = mockConnection($buffer);
 
         $handler = new Http11ProtocolHandler($connection, function () {
         });
@@ -212,7 +182,7 @@ describe('Error-state continuation bug — chunked body exceeding maxBodySize', 
 
     it('does not invoke the request handler after a 413 has already been sent mid-chunked-body', function () {
         $buffer = '';
-        $connection = mockConnection2($buffer);
+        $connection = mockConnection($buffer);
 
         $requestCount = 0;
         $handler = new Http11ProtocolHandler(

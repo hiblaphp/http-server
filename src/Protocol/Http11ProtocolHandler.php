@@ -149,6 +149,16 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      */
     public function writeResponse(Response $response): void
     {
+        // RFC 9931 section 8: a rejected CONNECT MUST force connection closure to prevent
+        // optimistically-pipelined data from being parsed as subsequent HTTP requests.
+        if (
+            $this->currentRequest !== null
+            && $this->currentRequest->getMethod() === 'CONNECT'
+            && $response->getStatusCode() >= 400
+        ) {
+            $this->willCloseConnection = true;
+        }
+
         $body = $response->getBody();
         $isStreamingOut = ! \is_string($body);
         $version = $response->getProtocolVersion() === '1.1' ? $this->activeResponseVersion : $response->getProtocolVersion();
@@ -190,6 +200,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $this->connection->write($headerBlock . $body);
             if ($shouldClose) {
                 $this->connection->close();
+                // Prevent the state machine from parsing any bytes still in the buffer
+                // after a connection close (e.g. optimistically-pipelined data after
+                // a rejected CONNECT per RFC 9931 section 8, or any Connection: close tear-down).
+                $this->state = self::STATE_UPGRADED;
             }
         } else {
             $this->connection->write($headerBlock);
@@ -208,6 +222,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                 }
                 if ($shouldClose) {
                     $this->connection->close();
+                    $this->state = self::STATE_UPGRADED;
                 }
             });
 
@@ -392,12 +407,24 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return false;
         }
 
+        if (\strlen($hex) > 15) {
+            $this->sendErrorAndClose(400, 'Bad Request');
+
+            return false;
+        }
+
         $this->currentChunkSize = (int) hexdec($hex);
 
         if ($this->currentChunkSize === 0) {
             $this->state = self::STATE_CHUNK_TRAILER;
 
             return $this->parseChunkTrailerPhase();
+        }
+
+        if ($this->currentChunkSize > $this->maxBodySize) {
+            $this->sendErrorAndClose(413, 'Payload Too Large');
+
+            return false;
         }
 
         $this->state = self::STATE_CHUNK_DATA;
@@ -497,7 +524,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function finalizeRequest(): void
     {
-        // Defensive guard: if a prior error already closed the connection
         if ($this->currentRequest === null || $this->state === self::STATE_UPGRADED) {
             return;
         }
@@ -512,7 +538,13 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         }
 
-        $this->state = self::STATE_HEADERS;
+        // The onRequest callback may have called writeResponse() with Connection: close,
+        // which sets STATE_UPGRADED. Do not clobber that and let the UPGRADED state stand
+        // so the buffer loop exits and the smuggled bytes are never parsed.
+        if ($this->state !== self::STATE_UPGRADED) {
+            $this->state = self::STATE_HEADERS;
+        }
+
         $this->currentRequest = null;
         $this->bodyStream = null;
         $this->bodyChunks = [];
@@ -678,18 +710,18 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
             if ($lastCoding !== 'chunked') {
                 $knownCodings = ['chunked', 'compress', 'deflate', 'gzip', 'x-compress', 'x-gzip'];
-                
+
                 if (\in_array($lastCoding, $knownCodings, true)) {
                     throw new MessageParsingException('Transfer-Encoding chain must end with chunked');
                 }
-                
+
                 throw new UnsupportedTransferCodingException("Unsupported transfer coding: \"{$lastCoding}\"");
             }
 
-            // Note: We intentionally do NOT validate intermediate codings here. 
-            // Intermediaries or the application layer MAY process compressed codings 
+            // Note: The parser intentionally do NOT validate intermediate codings here.
+            // Intermediaries or the application layer MAY process compressed codings
             // (e.g. gzip, chunked) internally. We only care that framing terminates in 'chunked'.
-            
+
             $this->isChunked = true;
 
             // RFC 9112 section 6.1/6.3: once Transfer-Encoding is confirmed to resolve to
