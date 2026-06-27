@@ -299,6 +299,12 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return false;
         }
 
+        // RFC 9110 Section 10.1.1: Automatically signal the client to send the body
+        // if the headers were successfully parsed and accepted.
+        if (strtolower($this->currentRequest->getHeaderLine('expect')) === '100-continue') {
+            $this->connection->write("HTTP/1.1 100 Continue\r\n\r\n");
+        }
+
         if ($this->streamingRequests) {
             $this->bodyStream = new RequestBodyStream();
             $this->bodyStream->on('pause', $this->connection->pause(...));
@@ -491,6 +497,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function finalizeRequest(): void
     {
+        // Defensive guard: if a prior error already closed the connection
         if ($this->currentRequest === null || $this->state === self::STATE_UPGRADED) {
             return;
         }
@@ -678,14 +685,15 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                 
                 throw new UnsupportedTransferCodingException("Unsupported transfer coding: \"{$lastCoding}\"");
             }
+
+            // Note: We intentionally do NOT validate intermediate codings here. 
+            // Intermediaries or the application layer MAY process compressed codings 
+            // (e.g. gzip, chunked) internally. We only care that framing terminates in 'chunked'.
             
             $this->isChunked = true;
 
             // RFC 9112 section 6.1/6.3: once Transfer-Encoding is confirmed to resolve to
-            // chunked framing, Content-Length is discarded outright and its value is never
-            // read, let alone validated. This also means a malformed or oversized
-            // Content-Length sent alongside a valid Transfer-Encoding never reaches the
-            // validation logic below; it's simply irrelevant.
+            // chunked framing, Content-Length is discarded outright
             unset($headers['content-length']);
             $this->expectedBodyLength = 0;
         } elseif ($hasCl) {
