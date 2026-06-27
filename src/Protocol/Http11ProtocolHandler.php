@@ -241,11 +241,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * before attempting to locate the request-line. Protects against buffer bloat
      * by enforcing a maximum header size.
      *
-     * The size cap is enforced on BOTH the "still waiting for the terminator" branch
-     * and the "terminator found" branch below. Checking only the former (the original
-     * bug) let an oversized header block bypass the limit entirely whenever it happened
-     * to arrive complete, terminator included, within a single handleData() call.
-     *
      * @return bool True if headers were successfully parsed or buffer advanced, false otherwise.
      */
     private function parseHeadersPhase(): bool
@@ -331,12 +326,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      *
      * Uses min() to derive the consumable chunk size in a single expression,
      * avoiding a redundant strlen() call on a freshly allocated substr result.
-     *
-     * pushBodyData() now returns a bool: if it returns false, an error response
-     * has already been written and the connection closed (state was set to
-     * STATE_UPGRADED). This method must bail out immediately in that case
-     * rather than proceeding to finalizeRequest(), which previously could fire
-     * the onRequest callback with a truncated body on an already-closed connection.
      */
     private function parseBodyLengthPhase(): bool
     {
@@ -370,12 +359,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * Complies with RFC 9112 section 7.1.2 by transitioning the state machine to consume
      * the trailer section once the terminal zero-size chunk is encountered.
      *
-     * Uses strpos over explode for chunk-extension detection to avoid an array allocation
-     * on every chunk in the common case where no extension is present.
-     *
-     * The "no CRLF found yet" branch now enforces MAX_CHUNK_LINE_SIZE, mirroring the
-     * header-size cap — without it, an unterminated chunk-size line could grow the
-     * receive buffer without bound while waiting for a line terminator that never arrives.
+     * Enforces strict ctype_xdigit verification to mitigate TE.TE smuggling vectors.
      *
      * @return bool True if a chunk size was parsed, false if waiting for more data.
      */
@@ -396,6 +380,12 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $extPos = strpos($line, ';');
         $hex = $extPos !== false ? rtrim(substr($line, 0, $extPos)) : trim($line);
 
+        if ($hex === '' || ! ctype_xdigit($hex)) {
+            $this->sendErrorAndClose(400, 'Bad Request');
+
+            return false;
+        }
+
         $this->currentChunkSize = (int) hexdec($hex);
 
         if ($this->currentChunkSize === 0) {
@@ -410,12 +400,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     }
 
     /**
-     * As with parseBodyLengthPhase(), this must bail out immediately — without
-     * advancing $bufferOffset or transitioning $state back to STATE_CHUNK_SIZE —
-     * when pushBodyData() signals that an error response has already been sent
-     * and the connection closed. The original code unconditionally overwrote
-     * the STATE_UPGRADED flag right after it was set, letting parsing continue
-     * on a connection that was supposed to be dead.
+     * Parses payload chunk data up to the previously extracted chunk size.
      */
     private function parseChunkDataPhase(): bool
     {
@@ -439,19 +424,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     /**
      * Consumes the chunked trailer section (RFC 9112 section 7.1.2).
-     *
-     * After the terminal "0\r\n" chunk, the wire format consists of zero or more
-     * trailer fields followed by an empty line (CRLF). This method skips the
-     * trailers entirely (as permitted by the RFC) and advances the buffer past
-     * the terminating CRLF boundary before finalizing the request.
-     *
-     * The fast path (no trailer fields) detects the bare terminating CRLF via direct
-     * character comparison against the offset pointer, avoiding a strpos scan when
-     * trailers are absent — which is the common case.
-     *
-     * The "no terminator found yet" branch enforces MAX_HEADER_SIZE as a stand-in
-     * trailer-section bound, for the same reason the header phase needs one: an
-     * unterminated trailer section is otherwise unbounded.
      *
      * @return bool True if the trailer section was fully consumed, false otherwise.
      */
@@ -491,9 +463,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * Pushes a body chunk to either the live stream or the buffered chunk list.
      *
      * @return bool False if this push triggered a 413 and closed the connection
-     *              (state is now STATE_UPGRADED) — callers MUST stop processing
-     *              immediately when this returns false rather than continuing to
-     *              advance the buffer or transition state.
      */
     private function pushBodyData(string $data): bool
     {
@@ -522,9 +491,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function finalizeRequest(): void
     {
-        // Defensive guard: if a prior error already closed the connection
-        // (state === STATE_UPGRADED) within this same handleData() call,
-        // never fire the onRequest callback on a dead connection.
         if ($this->currentRequest === null || $this->state === self::STATE_UPGRADED) {
             return;
         }
@@ -557,29 +523,20 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      *
      * Enforced RFC 9112 rules:
      * - section 2.2: Absorbs any stray empty lines between the start of the message and the request-line.
-     * - section 2.2: Rejects a bare CR (a CR not immediately followed by LF) within the request-line
-     *   or any header field line, instead of silently passing it through as a literal byte.
-     * - section 2.3: Validates HTTP version format and case sensitivity (e.g., "HTTP/1.1").
-     * - section 3.2: Enforces that the Host header is mandatory and singular for HTTP/1.1 requests.
-     * - section 5.1: Rejects any whitespace between the field name and the colon.
-     * - section 5.1: Rejects a field line with no colon at all, instead of silently skipping it.
+     * - section 2.2: Rejects a bare CR (a CR not immediately followed by LF) within the request-line or header field line.
+     * - section 2.3: Validates HTTP version format and case sensitivity.
+     * - section 3.1 / 5.5: Enforces strict VCHAR/Token validation to block control characters in methods and headers.
+     * - section 3.2: Enforces that the Host header is mandatory, singular, and does not contain a comma-separated list.
+     * - section 5.1: Rejects whitespace between field name and colon, or lines with no colon.
      * - section 5.2: Rejects Obsolete Line Folding (obs-fold) to prevent request smuggling.
-     * - section 6.1: Parses Transfer-Encoding as a list, treating the request as chunked only if "chunked" is the final coding.
-     * - section 6.1 / 6.3: Transfer-Encoding always overrides Content-Length whenever it is present at
-     *   all — not only when it resolves to "chunked" — so Content-Length is never even inspected once
-     *   a Transfer-Encoding header is found. A Transfer-Encoding that doesn't resolve to "chunked" as
-     *   its final coding is rejected outright (RFC 9110 section 10.1.4 suggests 501) rather than being
-     *   silently ignored in favor of Content-Length-based framing, which is a request-smuggling vector.
-     * - section 6.2 / RFC 9110 section 8.6: Rejects multiple conflicting Content-Length values, and
-     *   validates that any Content-Length value is a well-formed, unsigned decimal digit string —
-     *   never coerced via a permissive numeric cast that would silently accept "10abc" or "-5".
-     * - section 6.3: Removes Content-Length entirely if Transfer-Encoding is present, preventing conflicting body length calculations.
+     * - section 6.1: Enforces mandatory connection closure if both Transfer-Encoding and Content-Length are present.
+     * - section 6.3: Validates TE chains. 400 Bad Request if recognized but not chunked-terminated, 501 if unrecognized.
+     * - section 6.3: Removes Content-Length entirely if Transfer-Encoding is present.
      *
      * @param string $rawHeaders The raw HTTP header string including the request line.
      *
      * @throws MessageParsingException If any structural validation fails.
-     * @throws UnsupportedTransferCodingException If Transfer-Encoding names a coding this server
-     *                                            doesn't implement, or doesn't end in "chunked".
+     * @throws UnsupportedTransferCodingException If Transfer-Encoding names an unrecognized coding.
      * @throws PayloadTooLargeException If the calculated Content-Length exceeds the configured maximum body size.
      */
     private function parseHeaders(string $rawHeaders): void
@@ -606,6 +563,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $method = substr($requestLine, 0, $s1);
         $target = substr($requestLine, $s1 + 1, $s2 - $s1 - 1);
         $version = substr($requestLine, $s2 + 1);
+
+        if (preg_match('/[\x00-\x1F\x7F]/', $method)) {
+            throw new MessageParsingException('Invalid control character in request method');
+        }
 
         if (
             \strlen($version) !== 8
@@ -658,6 +619,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                 throw new MessageParsingException("Whitespace before colon is not permitted in field name: \"{$rawFieldName}\"");
             }
 
+            if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $fieldValue)) {
+                throw new MessageParsingException("Invalid control character in header field value for: \"{$rawFieldName}\"");
+            }
+
             $headers[strtolower($rawFieldName)][] = $fieldValue;
         }
 
@@ -670,47 +635,60 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             if (\count($headers['host']) > 1) {
                 throw new MessageParsingException('HTTP/1.1 requests MUST NOT contain more than one Host header field');
             }
+            if (str_contains($headers['host'][0], ',')) {
+                throw new MessageParsingException('Host header field must not contain a comma-separated list');
+            }
         }
 
         $this->isChunked = false;
         $this->expectedBodyLength = 0;
+        $forceClose = false;
 
-        if (isset($headers['transfer-encoding'])) {
+        $hasTe = isset($headers['transfer-encoding']);
+        $hasCl = isset($headers['content-length']);
+
+        if ($hasTe && $hasCl) {
+            $forceClose = true;
+        }
+
+        if ($hasTe) {
             $teVals = $headers['transfer-encoding'];
+            $codings = [];
 
-            if (\count($teVals) === 1 && ! str_contains($teVals[0], ',')) {
-                $coding = strtolower(trim($teVals[0]));
-
-                if ($coding !== 'chunked') {
-                    throw new UnsupportedTransferCodingException("Unsupported transfer coding: \"{$coding}\"");
-                }
-
-                $this->isChunked = true;
-            } else {
-                $codings = [];
-                foreach ($teVals as $value) {
-                    foreach (array_map('trim', explode(',', $value)) as $coding) {
-                        if ($coding !== '') {
-                            $codings[] = strtolower($coding);
-                        }
+            foreach ($teVals as $value) {
+                foreach (array_map('trim', explode(',', $value)) as $coding) {
+                    if ($coding !== '') {
+                        $codings[] = strtolower($coding);
                     }
                 }
-
-                if ($codings === [] || end($codings) !== 'chunked') {
-                    throw new UnsupportedTransferCodingException('Unsupported or malformed Transfer-Encoding chain');
-                }
-
-                $this->isChunked = true;
             }
 
+            if ($codings === []) {
+                throw new MessageParsingException('Malformed Transfer-Encoding chain');
+            }
+
+            $lastCoding = end($codings);
+
+            if ($lastCoding !== 'chunked') {
+                $knownCodings = ['chunked', 'compress', 'deflate', 'gzip', 'x-compress', 'x-gzip'];
+                
+                if (\in_array($lastCoding, $knownCodings, true)) {
+                    throw new MessageParsingException('Transfer-Encoding chain must end with chunked');
+                }
+                
+                throw new UnsupportedTransferCodingException("Unsupported transfer coding: \"{$lastCoding}\"");
+            }
+            
+            $this->isChunked = true;
+
             // RFC 9112 section 6.1/6.3: once Transfer-Encoding is confirmed to resolve to
-            // chunked framing, Content-Length is discarded outright — its value is never
+            // chunked framing, Content-Length is discarded outright and its value is never
             // read, let alone validated. This also means a malformed or oversized
             // Content-Length sent alongside a valid Transfer-Encoding never reaches the
             // validation logic below; it's simply irrelevant.
             unset($headers['content-length']);
             $this->expectedBodyLength = 0;
-        } elseif (isset($headers['content-length'])) {
+        } elseif ($hasCl) {
             $clVals = $headers['content-length'];
 
             if (\count($clVals) === 1 && ! str_contains($clVals[0], ',')) {
@@ -740,10 +718,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         $connHeader = strtolower($this->currentRequest->getHeaderLine('connection'));
         if ($this->currentRequest->getProtocolVersion() === '1.0') {
-            $this->willCloseConnection = ($connHeader !== 'keep-alive');
+            $this->willCloseConnection = $forceClose || ($connHeader !== 'keep-alive');
             $this->activeResponseVersion = '1.0';
         } else {
-            $this->willCloseConnection = ($connHeader === 'close');
+            $this->willCloseConnection = $forceClose || ($connHeader === 'close');
             $this->activeResponseVersion = '1.1';
         }
 
@@ -784,9 +762,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     /**
      * Reclaims memory from the processed segment of the TCP buffer.
-     *
-     * Executed exactly once per TCP read event to cap substr() allocations,
-     * maintaining high performance during pipelined request storms.
      */
     private function compactBuffer(): void
     {
