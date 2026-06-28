@@ -387,6 +387,96 @@ describe('Header Field Security — Token rule and control character injection',
 
 });
 
+describe('Header Field Security — Size and Count limits', function () {
+
+    it('rejects requests exceeding the maximum configured header count', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $requestReached = false;
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function () use (&$requestReached) {
+                $requestReached = true;
+            },
+            maxHeaderCount: 5
+        );
+
+        $raw = "GET / HTTP/1.1\r\nHost: localhost\r\n";
+        for ($i = 0; $i < 6; $i++) {
+            $raw .= "X-Custom-{$i}: value\r\n";
+        }
+        $raw .= "\r\n";
+
+        $handler->handleData($raw);
+
+        expect($buffer)->toContain('HTTP/1.1 400 Bad Request')
+            ->and($requestReached)->toBeFalse()
+        ;
+    });
+
+    it('accepts requests exactly at the maximum header count', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer);
+
+        $parsedRequest = null;
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request) use (&$parsedRequest) {
+                $parsedRequest = $request;
+            },
+            maxHeaderCount: 5
+        );
+
+        $raw = "GET / HTTP/1.1\r\nHost: localhost\r\n";
+        for ($i = 0; $i < 4; $i++) {
+            $raw .= "X-Custom-{$i}: value\r\n";
+        }
+        $raw .= "\r\n";
+
+        $handler->handleData($raw);
+
+        expect($parsedRequest)->not->toBeNull()
+            ->and(count($parsedRequest->getHeaders()))->toBe(5)
+        ;
+    });
+
+    it('rejects requests with header names exceeding the maximum allowed length (256 bytes)', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $requestReached = false;
+        $handler = new Http11ProtocolHandler($connection, function () use (&$requestReached) {
+            $requestReached = true;
+        });
+
+        $longHeaderName = str_repeat('X', 257);
+        $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\n{$longHeaderName}: value\r\n\r\n");
+
+        expect($buffer)->toContain('HTTP/1.1 400 Bad Request')
+            ->and($requestReached)->toBeFalse()
+        ;
+    });
+
+    it('accepts requests with header names exactly at the maximum allowed length', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer);
+
+        $parsedRequest = null;
+        $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$parsedRequest) {
+            $parsedRequest = $request;
+        });
+
+        $longHeaderName = str_repeat('X', 256);
+        $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\n{$longHeaderName}: value\r\n\r\n");
+
+        expect($parsedRequest)->not->toBeNull()
+            ->and($parsedRequest->hasHeader($longHeaderName))->toBeTrue()
+        ;
+    });
+
+});
+
 describe('Request Method — Token rule validation', function () {
 
     it('rejects a request method containing a delimiter character such as an angle bracket', function () {

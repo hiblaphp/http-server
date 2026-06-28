@@ -58,8 +58,14 @@ use Hibla\Socket\Interfaces\ConnectionInterface;
  *
  * ─── Security Hardening ──────────────────────────────────────────────────────────
  *
- * - MAX_HEADER_SIZE (8 KiB) caps header block accumulation to prevent memory
+ * - maxHeaderSize (default 8 KiB) caps header block accumulation to prevent memory
  *   exhaustion from clients that never send the "\r\n\r\n" terminator (→ 431).
+ *
+ * - maxHeaderCount (default 100) caps the number of headers to prevent loop/CPU
+ *   exhaustion and array/cache bloat.
+ *
+ * - MAX_HEADER_NAME_LENGTH (256 bytes) stops excessively long header field names
+ *   from hitting expensive VCHAR regex validations.
  *
  * - MAX_CHUNK_LINE_SIZE (1 KiB) prevents unbounded buffer growth when a client
  *   streams a chunk-size line without a terminating CRLF (→ 400).
@@ -94,9 +100,9 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private const int STATE_CHUNK_TRAILER = 5;
 
-    private const int MAX_HEADER_SIZE = 8192;
-
     private const int MAX_HEADER_CACHE_SIZE = 512;
+
+    private const int MAX_HEADER_NAME_LENGTH = 256;
 
     private const int MAX_CHUNK_LINE_SIZE = 1024;
 
@@ -154,12 +160,16 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      *                         Individual chunk sizes in streaming mode are independently capped
      *                         at MAX_STREAMING_CHUNK_SIZE as a memory safety bound.
      * @param bool $streamingRequests True to enable streaming request bodies
+     * @param int $maxHeaderSize Maximum total size of the header block in bytes.
+     * @param int $maxHeaderCount Maximum number of header fields allowed per request.
      */
     public function __construct(
         private readonly ConnectionInterface $connection,
         private readonly mixed $onRequest,
         private readonly int $maxBodySize = 10485760,
-        private readonly bool $streamingRequests = false
+        private readonly bool $streamingRequests = false,
+        private readonly int $maxHeaderSize = 8192,
+        private readonly int $maxHeaderCount = 100
     ) {
     }
 
@@ -355,14 +365,14 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $headerEndPos = strpos($this->buffer, "\r\n\r\n", $this->bufferOffset);
 
         if ($headerEndPos === false) {
-            if ($available > self::MAX_HEADER_SIZE) {
+            if ($available > $this->maxHeaderSize) {
                 $this->sendErrorAndClose(431, 'Request Header Fields Too Large');
             }
 
             return false;
         }
 
-        if ($headerEndPos - $this->bufferOffset > self::MAX_HEADER_SIZE) {
+        if ($headerEndPos - $this->bufferOffset > $this->maxHeaderSize) {
             $this->sendErrorAndClose(431, 'Request Header Fields Too Large');
 
             return false;
@@ -607,7 +617,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $trailerEnd = strpos($this->buffer, "\r\n\r\n", $this->bufferOffset);
 
         if ($trailerEnd === false) {
-            if ($available > self::MAX_HEADER_SIZE) {
+            if ($available > $this->maxHeaderSize) {
                 $this->sendErrorAndClose(400, 'Bad Request');
             }
 
@@ -750,6 +760,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $headers = [];
         $offset = 0;
         $headerBodyLen = \strlen($headerBody);
+        $headerCount = 0;
 
         while ($offset < $headerBodyLen) {
             $nextCrLf = strpos($headerBody, "\r\n", $offset);
@@ -764,6 +775,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
             if ($line !== '' && ($line[0] === ' ' || $line[0] === "\t")) {
                 throw new MessageParsingException('Obsolete line folding (obs-fold) is not permitted in requests');
+            }
+
+            if (++$headerCount > $this->maxHeaderCount) {
+                throw new MessageParsingException('Too many header fields');
             }
 
             // RFC 9112 section 2.2: a bare CR within a field line must be rejected rather
@@ -781,6 +796,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
 
             $rawFieldName = substr($line, 0, $colonPos);
+
+            if (\strlen($rawFieldName) > self::MAX_HEADER_NAME_LENGTH) {
+                throw new MessageParsingException("Header field name exceeds maximum allowed length: \"{$rawFieldName}\"");
+            }
+
             $fieldValue = trim(substr($line, $colonPos + 1), " \t");
 
             if ($rawFieldName !== rtrim($rawFieldName)) {
