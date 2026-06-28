@@ -15,6 +15,10 @@ use Hibla\Stream\ThroughStream;
 
 use function Hibla\await;
 
+afterEach(function () {
+    Loop::reset();
+});
+
 describe('End-to-End Functional Tests (Real Sockets)', function () {
 
     it('handles a real GET request end-to-end', function () {
@@ -170,5 +174,4 @@ describe('End-to-End Functional Tests (Real Sockets)', function () {
             $socket->close();
         }
     });
-
 });
