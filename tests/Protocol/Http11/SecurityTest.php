@@ -82,7 +82,6 @@ describe('Chunk size pre-validation against maxBodySize', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('hexdec() float overflow on long chunk-size hex strings', function () {
@@ -159,8 +158,7 @@ describe('hexdec() float overflow on long chunk-size hex strings', function () {
 
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () {
-            },
+            function () {},
             maxBodySize: 16
         );
 
@@ -176,7 +174,6 @@ describe('hexdec() float overflow on long chunk-size hex strings', function () {
             ->and($buffer)->not->toContain('400')
         ;
     });
-
 });
 
 describe('Request Smuggling — Connection: close isolation', function () {
@@ -195,7 +192,7 @@ describe('Request Smuggling — Connection: close isolation', function () {
         );
 
         $raw = "GET /first HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-             . "GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n";
+            . "GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -216,7 +213,7 @@ describe('Request Smuggling — Connection: close isolation', function () {
         );
 
         $raw = "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n"
-             . "GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n";
+            . "GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -258,7 +255,6 @@ describe('Request Smuggling — Connection: close isolation', function () {
             ->and($requestCount)->toBe(0)
         ;
     });
-
 });
 
 describe('Request Smuggling — TE.TE double-chunked attack', function () {
@@ -273,10 +269,10 @@ describe('Request Smuggling — TE.TE double-chunked attack', function () {
         });
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: chunked, chunked\r\n"
-             . "\r\n"
-             . "5\r\nhello\r\n0\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked, chunked\r\n"
+            . "\r\n"
+            . "5\r\nhello\r\n0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -284,7 +280,6 @@ describe('Request Smuggling — TE.TE double-chunked attack', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('Header Field Security — Token rule and control character injection', function () {
@@ -384,7 +379,6 @@ describe('Header Field Security — Token rule and control character injection',
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('Header Field Security — Size and Count limits', function () {
@@ -410,7 +404,7 @@ describe('Header Field Security — Size and Count limits', function () {
 
         $handler->handleData($raw);
 
-        expect($buffer)->toContain('HTTP/1.1 400 Bad Request')
+        expect($buffer)->toContain('HTTP/1.1 431 Request Header Fields Too Large')
             ->and($requestReached)->toBeFalse()
         ;
     });
@@ -453,7 +447,7 @@ describe('Header Field Security — Size and Count limits', function () {
         $longHeaderName = str_repeat('X', 257);
         $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\n{$longHeaderName}: value\r\n\r\n");
 
-        expect($buffer)->toContain('HTTP/1.1 400 Bad Request')
+        expect($buffer)->toContain('HTTP/1.1 431 Request Header Fields Too Large')
             ->and($requestReached)->toBeFalse()
         ;
     });
@@ -474,7 +468,6 @@ describe('Header Field Security — Size and Count limits', function () {
             ->and($parsedRequest->hasHeader($longHeaderName))->toBeTrue()
         ;
     });
-
 });
 
 describe('Request Method — Token rule validation', function () {
@@ -494,7 +487,6 @@ describe('Request Method — Token rule validation', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('Content-Length — Edge cases and overflow attacks', function () {
@@ -562,7 +554,6 @@ describe('Content-Length — Edge cases and overflow attacks', function () {
             ->and($parsedRequest->getBody())->toBe('hello w')
         ;
     });
-
 });
 
 describe('Chunked Encoding — Edge cases', function () {
@@ -577,10 +568,10 @@ describe('Chunked Encoding — Edge cases', function () {
         });
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: chunked\r\n"
-             . "\r\n"
-             . "0\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -599,11 +590,11 @@ describe('Chunked Encoding — Edge cases', function () {
         });
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: chunked\r\n"
-             . "\r\n"
-             . "5\r\nhello\r\n"
-             . "0;checksum=abc123\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "5\r\nhello\r\n"
+            . "0;checksum=abc123\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -624,10 +615,10 @@ describe('Chunked Encoding — Edge cases', function () {
         $binaryPayload = "he\x00lo";
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: chunked\r\n"
-             . "\r\n"
-             . "5\r\n{$binaryPayload}\r\n0\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "5\r\n{$binaryPayload}\r\n0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -646,10 +637,10 @@ describe('Chunked Encoding — Edge cases', function () {
         });
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: CHUNKED\r\n"
-             . "\r\n"
-             . "5\r\nhello\r\n0\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: CHUNKED\r\n"
+            . "\r\n"
+            . "5\r\nhello\r\n0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -668,11 +659,11 @@ describe('Chunked Encoding — Edge cases', function () {
         });
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: gzip\r\n"
-             . "Transfer-Encoding: chunked\r\n"
-             . "\r\n"
-             . "5\r\nhello\r\n0\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: gzip\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "5\r\nhello\r\n0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -680,7 +671,6 @@ describe('Chunked Encoding — Edge cases', function () {
             ->and($parsedRequest->getBody())->toBe('hello')
         ;
     });
-
 });
 
 describe('HTTP Version — Grammar edge cases', function () {
@@ -732,7 +722,6 @@ describe('HTTP Version — Grammar edge cases', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('HTTP/1.0 — Specific compliance', function () {
@@ -774,7 +763,6 @@ describe('HTTP/1.0 — Specific compliance', function () {
             ->and($buffer)->not->toContain('HTTP/1.1')
         ;
     });
-
 });
 
 describe('GET with body — Framing correctness', function () {
@@ -789,10 +777,10 @@ describe('GET with body — Framing correctness', function () {
         });
 
         $raw = "GET / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Content-Length: 4\r\n"
-             . "\r\n"
-             . 'body';
+            . "Host: localhost\r\n"
+            . "Content-Length: 4\r\n"
+            . "\r\n"
+            . 'body';
 
         $handler->handleData($raw);
 
@@ -812,13 +800,13 @@ describe('GET with body — Framing correctness', function () {
         });
 
         $raw = "GET /first HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Content-Length: 4\r\n"
-             . "\r\n"
-             . 'body'
-             . "GET /second HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "\r\n";
+            . "Host: localhost\r\n"
+            . "Content-Length: 4\r\n"
+            . "\r\n"
+            . 'body'
+            . "GET /second HTTP/1.1\r\n"
+            . "Host: localhost\r\n"
+            . "\r\n";
 
         $handler->handleData($raw);
 
@@ -827,7 +815,6 @@ describe('GET with body — Framing correctness', function () {
             ->and($parsedRequests[1]->getUri())->toBe('/second')
         ;
     });
-
 });
 
 describe('State machine — Per-request state reset integrity', function () {
@@ -842,15 +829,15 @@ describe('State machine — Per-request state reset integrity', function () {
         });
 
         $raw = "POST /first HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: chunked\r\n"
-             . "\r\n"
-             . "3\r\nfoo\r\n0\r\n\r\n"
-             . "POST /second HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Transfer-Encoding: chunked\r\n"
-             . "\r\n"
-             . "3\r\nbar\r\n0\r\n\r\n";
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "3\r\nfoo\r\n0\r\n\r\n"
+            . "POST /second HTTP/1.1\r\n"
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "3\r\nbar\r\n0\r\n\r\n";
 
         $handler->handleData($raw);
 
@@ -870,7 +857,7 @@ describe('State machine — Per-request state reset integrity', function () {
         });
 
         $raw = "POST /first HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nfoo"
-             . "POST /second HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nbar";
+            . "POST /second HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nbar";
 
         $handler->handleData($raw);
 
@@ -894,10 +881,10 @@ describe('State machine — Per-request state reset integrity', function () {
         );
 
         $raw = "POST / HTTP/1.1\r\n"
-             . "Host: localhost\r\n"
-             . "Content-Length: 10\r\n"
-             . "\r\n"
-             . 'helloworld';
+            . "Host: localhost\r\n"
+            . "Content-Length: 10\r\n"
+            . "\r\n"
+            . 'helloworld';
 
         $handler->handleData($raw);
 
@@ -905,7 +892,6 @@ describe('State machine — Per-request state reset integrity', function () {
             ->and($requestCount)->toBe(0)
         ;
     });
-
 });
 
 describe('Request Target — control character injection', function () {
@@ -941,7 +927,6 @@ describe('Request Target — control character injection', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('Content-Length — PHP integer saturation at upper boundary', function () {
@@ -961,5 +946,4 @@ describe('Content-Length — PHP integer saturation at upper boundary', function
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });

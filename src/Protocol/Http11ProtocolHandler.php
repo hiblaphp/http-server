@@ -6,6 +6,7 @@ namespace Hibla\HttpServer\Protocol;
 
 use Hibla\HttpServer\Exceptions\MessageParsingException;
 use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
+use Hibla\HttpServer\Exceptions\RequestHeaderFieldsTooLargeException;
 use Hibla\HttpServer\Exceptions\UnsupportedTransferCodingException;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
@@ -170,8 +171,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         private readonly bool $streamingRequests = false,
         private readonly int $maxHeaderSize = 8192,
         private readonly int $maxHeaderCount = 100
-    ) {
-    }
+    ) {}
 
     /**
      * @inheritDoc
@@ -385,6 +385,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $this->parseHeaders($rawHeaders);
         } catch (PayloadTooLargeException) {
             $this->sendErrorAndClose(413, 'Payload Too Large');
+
+            return false;
+        } catch (RequestHeaderFieldsTooLargeException) {
+            $this->sendErrorAndClose(431, 'Request Header Fields Too Large');
 
             return false;
         } catch (UnsupportedTransferCodingException) {
@@ -778,7 +782,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
 
             if (++$headerCount > $this->maxHeaderCount) {
-                throw new MessageParsingException('Too many header fields');
+                throw new RequestHeaderFieldsTooLargeException('Too many header fields');
             }
 
             // RFC 9112 section 2.2: a bare CR within a field line must be rejected rather
@@ -798,7 +802,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $rawFieldName = substr($line, 0, $colonPos);
 
             if (\strlen($rawFieldName) > self::MAX_HEADER_NAME_LENGTH) {
-                throw new MessageParsingException("Header field name exceeds maximum allowed length: \"{$rawFieldName}\"");
+                throw new RequestHeaderFieldsTooLargeException("Header field name exceeds maximum allowed length: \"{$rawFieldName}\"");
             }
 
             $fieldValue = trim(substr($line, $colonPos + 1), " \t");
