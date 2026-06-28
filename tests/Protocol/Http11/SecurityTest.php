@@ -158,7 +158,8 @@ describe('hexdec() float overflow on long chunk-size hex strings', function () {
 
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () {},
+            function () {
+            },
             maxBodySize: 16
         );
 

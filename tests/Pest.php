@@ -23,11 +23,14 @@ function mockConnection(string &$buffer, bool $expectClose = false): ConnectionI
         return true;
     });
 
-    if ($expectClose) {
-        $connection->shouldReceive('close')->once();
-    } else {
-        $connection->shouldReceive('close')->zeroOrMoreTimes();
-    }
+    $connection->shouldReceive('end')->andReturnUsing(function (?string $data = null) use (&$buffer) {
+        if ($data !== null) {
+            $buffer .= $data;
+        }
+    });
+
+    $connection->shouldReceive('close')->zeroOrMoreTimes();
+    $connection->shouldReceive('end')->zeroOrMoreTimes();
 
     return $connection;
 }
@@ -43,8 +46,15 @@ function mockStreamingConnection(string &$buffer): ConnectionInterface
         return true;
     });
 
+    $connection->shouldReceive('end')->andReturnUsing(function (?string $data = null) use (&$buffer) {
+        if ($data !== null) {
+            $buffer .= $data;
+        }
+    });
+
     $connection->shouldReceive('pause')->zeroOrMoreTimes();
     $connection->shouldReceive('resume')->zeroOrMoreTimes();
+    $connection->shouldReceive('close')->zeroOrMoreTimes();
 
     return $connection;
 }
@@ -60,7 +70,7 @@ function createTestServer(
     int $maxHeaderCount = 100
 ): array {
     $socket = new SocketServer('tcp://127.0.0.1:0');
-    
+
     HttpServer::attachProtocolHandler(
         $socket,
         $requestHandler,
@@ -69,8 +79,8 @@ function createTestServer(
         $maxHeaderSize,
         $maxHeaderCount
     );
-    
+
     $url = str_replace('tcp://', 'http://', $socket->getAddress());
-    
+
     return [$socket, $url];
 }

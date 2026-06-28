@@ -452,7 +452,9 @@ final class HttpServer implements HttpServerInterface
     }
 
     /**
-     * @internal Wires the socket events to the protocol handler.
+     * Wires the socket events to the protocol handler.
+     *
+     * @internal This is for internal usage and testing purposes.
      */
     public static function attachProtocolHandler(
         ServerInterface $socket,

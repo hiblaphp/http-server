@@ -171,7 +171,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         private readonly bool $streamingRequests = false,
         private readonly int $maxHeaderSize = 8192,
         private readonly int $maxHeaderCount = 100
-    ) {}
+    ) {
+    }
 
     /**
      * @inheritDoc
@@ -284,13 +285,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $headerBlock = implode("\r\n", $lines) . "\r\n\r\n";
 
         if (\is_string($body)) {
-            $this->connection->write($headerBlock . $body);
             if ($shouldClose) {
-                $this->connection->close();
-                // Prevent the state machine from parsing any bytes still in the buffer
-                // after a connection close (e.g. optimistically-pipelined data after
-                // a rejected CONNECT per RFC 9931 section 8, or any Connection: close tear-down).
+                $this->connection->end($headerBlock . $body);
                 $this->state = self::STATE_UPGRADED;
+            } else {
+                $this->connection->write($headerBlock . $body);
             }
         } else {
             $this->connection->write($headerBlock);
@@ -304,12 +303,19 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             });
 
             $body->on('end', function () use ($isChunkedResponse, $shouldClose) {
-                if ($isChunkedResponse) {
-                    $this->connection->write("0\r\n\r\n");
-                }
+                $finalChunk = $isChunkedResponse ? "0\r\n\r\n" : '';
+
                 if ($shouldClose) {
-                    $this->connection->close();
+                    if ($finalChunk !== '') {
+                        $this->connection->end($finalChunk);
+                    } else {
+                        $this->connection->end();
+                    }
                     $this->state = self::STATE_UPGRADED;
+                } else {
+                    if ($finalChunk !== '') {
+                        $this->connection->write($finalChunk);
+                    }
                 }
             });
 
@@ -979,8 +985,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function sendErrorAndClose(int $statusCode, string $reason): void
     {
-        $this->connection->write("HTTP/1.1 {$statusCode} {$reason}\r\nConnection: close\r\n\r\n");
-        $this->connection->close();
+        $this->connection->end("HTTP/1.1 {$statusCode} {$reason}\r\nConnection: close\r\n\r\n");
         $this->state = self::STATE_UPGRADED;
     }
 

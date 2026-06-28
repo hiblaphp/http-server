@@ -93,7 +93,12 @@ it('rejects and responds with a 431 status code if headers are too large', funct
 
         return true;
     });
-    $connection->shouldReceive('close')->once();
+
+    $connection->shouldReceive('end')->andReturnUsing(function (?string $data = null) use (&$writtenBuffer) {
+        if ($data !== null) {
+            $writtenBuffer .= $data;
+        }
+    });
 
     $handler = new Http11ProtocolHandler($connection, function () {
     });
@@ -115,7 +120,12 @@ it('rejects and responds with a 413 status code if content-length exceeds max li
 
         return true;
     });
-    $connection->shouldReceive('close')->once();
+
+    $connection->shouldReceive('end')->andReturnUsing(function (?string $data = null) use (&$writtenBuffer) {
+        if ($data !== null) {
+            $writtenBuffer .= $data;
+        }
+    });
 
     $handler = new Http11ProtocolHandler($connection, function () {
     }, maxBodySize: 10);
@@ -260,7 +270,12 @@ it('responds with 400 Bad Request and terminates when the request line is struct
 
         return true;
     });
-    $connection->shouldReceive('close')->once();
+
+    $connection->shouldReceive('end')->andReturnUsing(function (?string $data = null) use (&$writtenBuffer) {
+        if ($data !== null) {
+            $writtenBuffer .= $data;
+        }
+    });
 
     $handler = new Http11ProtocolHandler($connection, function () {
     });
