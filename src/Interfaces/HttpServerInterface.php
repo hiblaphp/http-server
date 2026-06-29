@@ -74,16 +74,6 @@ interface HttpServerInterface
     public function withWorkerMemoryLimit(string $limit): static;
 
     /**
-     * Set a bootstrap file and/or callback to be executed in each worker process.
-     *
-     * @param string $file Absolute path to a PHP file to require.
-     * @param (callable(string $file): mixed)|null $callback Optional callback to run after file inclusion.
-     *
-     * @return static A new instance with the bootstrap logic configured.
-     */
-    public function withBootstrap(string $file, ?callable $callback = null): static;
-
-    /**
      * Configure the maximum allowed request body size for buffered requests.
      *
      * Requests exceeding this size will be rejected with a 413 Payload Too Large.
@@ -155,6 +145,34 @@ interface HttpServerInterface
      * @return static
      */
     public function withKeepAliveTimeout(?float $seconds): static;
+
+    /**
+     * Set a bootstrap file and/or callback to be executed specifically in each
+     * cluster worker process when using multi-core clustering.
+     *
+     * **NOTE:** This method is a no-op (ignored) when running entirely in single-process
+     * mode (i.e., without configuring clustering via `withCluster()`).
+     *
+     * @param string $file Absolute path to a PHP file to require.
+     * @param (callable(string $file): mixed)|null $callback Optional callback to run after file inclusion.
+     *
+     * @return static A new instance with the cluster bootstrap logic configured.
+     */
+    public function withClusterBootstrap(string $file, ?callable $callback = null): static;
+
+    /**
+     * Register a callback to be executed once per process (once in single-process mode,
+     * or once per worker process in cluster mode) immediately before the HTTP server
+     * starts accepting connections.
+     *
+     * This is the designated place to initialize database connection pools, Redis clients,
+     * or any other stateful application resources.
+     *
+     * @param callable $callback
+     *
+     * @return static
+     */
+    public function onStart(callable $callback): static;
 
     /**
      * Start the HTTP Server and block the current thread to process incoming requests.

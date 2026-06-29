@@ -25,6 +25,7 @@ final class ServerWorkerTask
      * @param bool $pauseOnLimit
      * @param int $maxHeaderSize Maximum total size of the header block in bytes
      * @param int $maxHeaderCount Maximum number of header fields allowed per request
+     * @param callable|null $onStartCallback
      */
     public function __construct(
         private readonly string $uri,
@@ -37,12 +38,17 @@ final class ServerWorkerTask
         private readonly int $maxHeaderSize = 8192,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
-        private readonly ?float $keepAliveTimeout = null
+        private readonly ?float $keepAliveTimeout = null,
+        private readonly mixed $onStartCallback = null
     ) {
     }
 
     public function __invoke(): void
     {
+        if ($this->onStartCallback !== null) {
+            ($this->onStartCallback)();
+        }
+
         $socket = new SocketServer($this->uri, $this->context);
 
         if ($this->connectionLimit !== null) {

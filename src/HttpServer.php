@@ -50,12 +50,17 @@ final class HttpServer implements HttpServerInterface
 
     private ?string $workerMemoryLimit = null;
 
-    private ?string $bootstrapFile = null;
+    private ?string $clusterBootstrapFile = null;
 
     /**
      * @var (callable(string): mixed)|null
      */
-    private $bootstrapCallback = null;
+    private $clusterBootstrapCallback = null;
+
+    /**
+     * @var callable|null
+     */
+    private $onStartCallback = null;
 
     private ?float $headerTimeout = null;
 
@@ -74,9 +79,9 @@ final class HttpServer implements HttpServerInterface
     private bool $streamingRequests = false;
 
     /**
-     * @var int Maximum total header block size in bytes (Default: 8192)
+     * @var int Maximum total header block size in bytes (Default: 16384)
      */
-    private int $maxHeaderSize = 8192;
+    private int $maxHeaderSize = 16384;
 
     /**
      * @var int Maximum number of header fields allowed (Default: 100)
@@ -209,11 +214,22 @@ final class HttpServer implements HttpServerInterface
     /**
      * {@inheritdoc}
      */
-    public function withBootstrap(string $file, ?callable $callback = null): static
+    public function withClusterBootstrap(string $file, ?callable $callback = null): static
     {
         $clone = clone $this;
-        $clone->bootstrapFile = $file;
-        $clone->bootstrapCallback = $callback;
+        $clone->clusterBootstrapFile = $file;
+        $clone->clusterBootstrapCallback = $callback;
+
+        return $clone;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function onStart(callable $callback): static
+    {
+        $clone = clone $this;
+        $clone->onStartCallback = $callback;
 
         return $clone;
     }
@@ -329,6 +345,10 @@ final class HttpServer implements HttpServerInterface
 
     private function runSingleProcess(callable $requestHandler): void
     {
+        if ($this->onStartCallback !== null) {
+            ($this->onStartCallback)();
+        }
+
         $socket = new SocketServer($this->uri, $this->context);
 
         if ($this->connectionLimit !== null) {
@@ -382,7 +402,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
-            $this->keepAliveTimeout
+            $this->keepAliveTimeout,
+            $this->onStartCallback
         );
 
         $isShuttingDown = false;
@@ -410,8 +431,8 @@ final class HttpServer implements HttpServerInterface
             $pool = $pool->withMemoryLimit($this->workerMemoryLimit);
         }
 
-        if ($this->bootstrapFile !== null) {
-            $pool = $pool->withBootstrap($this->bootstrapFile, $this->bootstrapCallback);
+        if ($this->clusterBootstrapFile !== null) {
+            $pool = $pool->withBootstrap($this->clusterBootstrapFile, $this->clusterBootstrapCallback);
         }
 
         if ($this->workerRestartLimit !== null) {

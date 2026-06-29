@@ -104,12 +104,41 @@ describe('HttpServer Configuration & Instantiation', function () {
         expect(getServerProperty($server, 'workerMemoryLimit'))->toBe('256M');
     });
 
-    it('can configure worker bootstrap files and callbacks', function () {
+    it('can configure cluster bootstrap files and callbacks', function () {
         $callback = fn () => true;
-        $server = HttpServer::create()->withBootstrap('/app/bootstrap.php', $callback);
+        $server = HttpServer::create()->withClusterBootstrap('/app/bootstrap.php', $callback);
 
-        expect(getServerProperty($server, 'bootstrapFile'))->toBe('/app/bootstrap.php')
-            ->and(getServerProperty($server, 'bootstrapCallback'))->toBe($callback)
+        expect(getServerProperty($server, 'clusterBootstrapFile'))->toBe('/app/bootstrap.php')
+            ->and(getServerProperty($server, 'clusterBootstrapCallback'))->toBe($callback)
+        ;
+    });
+
+    it('can configure a unified application start callback', function () {
+        $callback = fn () => true;
+        $server = HttpServer::create()->onStart($callback);
+
+        expect(getServerProperty($server, 'onStartCallback'))->toBe($callback);
+    });
+
+    it('can configure header timeout and keep alive timeout', function () {
+        $server = HttpServer::create()
+            ->withHeaderTimeout(0.5)
+            ->withKeepAliveTimeout(1.5)
+        ;
+
+        expect(getServerProperty($server, 'headerTimeout'))->toBe(0.5)
+            ->and(getServerProperty($server, 'keepAliveTimeout'))->toBe(1.5)
+        ;
+    });
+
+    it('can disable header timeout and keep alive timeout by passing null', function () {
+        $server = HttpServer::create()
+            ->withHeaderTimeout(null)
+            ->withKeepAliveTimeout(null)
+        ;
+
+        expect(getServerProperty($server, 'headerTimeout'))->toBeNull()
+            ->and(getServerProperty($server, 'keepAliveTimeout'))->toBeNull()
         ;
     });
 
