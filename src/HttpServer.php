@@ -506,7 +506,8 @@ final class HttpServer implements HttpServerInterface
                 if (\is_array($data) && ($data['type'] ?? '') === 'log') {
                     $this->log("[Worker {$message->pid}] {$data['message']}");
                 }
-            });
+            })
+        ;
 
         if ($this->workerMemoryLimit !== null) {
             $pool = $pool->withMemoryLimit($this->workerMemoryLimit);

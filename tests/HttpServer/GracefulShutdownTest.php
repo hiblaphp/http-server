@@ -20,6 +20,7 @@ describe('Server-level Graceful Draining', function () {
 
         $triggerShutdown = HttpServer::attachProtocolHandler($socket, function () {
             await(delay(0.2));
+
             return ServerResponse::plaintext('Completed safely!');
         });
 
@@ -71,7 +72,9 @@ describe('Server-level Graceful Draining', function () {
         await(delay(0.05));
         $stream->end();
 
-        await(delay(0.05)); 
+        await($clientPromise);
+
+        await(delay(0.05));
 
         expect($chunksReceived)->toBe(["chunk1\n", "chunk2\n"]);
         expect($triggerShutdown())->toBe(0);

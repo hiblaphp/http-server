@@ -373,7 +373,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                 $this->connection->removeListener('drain', $drainListener);
 
                 $finalChunk = $isChunkedResponse ? "0\r\n\r\n" : '';
-                if ($shouldClose) {
+
+                if ($shouldClose || $this->willCloseConnection) {
                     if ($finalChunk !== '') {
                         $this->connection->end($finalChunk);
                     } else {
@@ -432,6 +433,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      */
     public function gracefulShutdown(): void
     {
+        // Ignore if the connection has already been detached/upgraded
+        if ($this->state === self::STATE_UPGRADED) {
+            return;
+        }
+
         $this->willCloseConnection = true;
 
         // If no request is currently being processed, it is safe to close the connection immediately.
@@ -1192,14 +1198,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function cancelKeepAliveTimer(): void
     {
-        if ($this->keepAliveTimeout === null || $this->keepAliveTimerId !== null) {
-            return;
+        if ($this->keepAliveTimerId !== null) {
+            Loop::cancelTimer($this->keepAliveTimerId);
+            $this->keepAliveTimerId = null;
         }
-
-        $this->keepAliveTimerId = Loop::addTimer($this->keepAliveTimeout, function () {
-            $this->connection->close();
-            $this->state = self::STATE_UPGRADED;
-        });
     }
 
     private function cancelAllTimers(): void

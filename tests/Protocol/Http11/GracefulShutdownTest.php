@@ -17,7 +17,8 @@ describe('Protocol-level Graceful Shutdown', function () {
             $wasClosed = true;
         });
 
-        $handler = new Http11ProtocolHandler($connection, function () {});
+        $handler = new Http11ProtocolHandler($connection, function () {
+        });
 
         $handler->gracefulShutdown();
 
@@ -53,17 +54,18 @@ describe('Protocol-level Graceful Shutdown', function () {
         $connection = createCloseableMockConnection($buffer);
 
         $requestsProcessed = 0;
-        $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$requestsProcessed) {
+        $handler = null;
+
+        $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$requestsProcessed, &$handler) {
             $requestsProcessed++;
+
+            if ($requestsProcessed === 1) {
+                $handler->gracefulShutdown();
+                $handler->writeResponse(Response::plaintext('First OK'));
+            }
         });
 
         $handler->handleData("GET /first HTTP/1.1\r\nHost: localhost\r\n\r\nGET /second HTTP/1.1\r\nHost: localhost\r\n\r\n");
-
-        expect($requestsProcessed)->toBe(1);
-
-        $handler->gracefulShutdown();
-
-        $handler->writeResponse(Response::plaintext('First OK'));
 
         expect($requestsProcessed)->toBe(1);
         expect($buffer)->toContain('First OK');
@@ -78,7 +80,8 @@ describe('Protocol-level Graceful Shutdown', function () {
             $wasClosed = true;
         });
 
-        $handler = new Http11ProtocolHandler($connection, function () {});
+        $handler = new Http11ProtocolHandler($connection, function () {
+        });
 
         $handler->gracefulShutdown();
         $handler->gracefulShutdown();
@@ -96,7 +99,8 @@ describe('Protocol-level Graceful Shutdown', function () {
             $wasClosed = true;
         });
 
-        $handler = new Http11ProtocolHandler($connection, function () {});
+        $handler = new Http11ProtocolHandler($connection, function () {
+        });
 
         $handler->detach();
 
