@@ -321,22 +321,28 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
             $this->connection->write($headerBlock);
 
-            $connectionCloseListener = function () use ($body) {
-                $body->close();
-            };
+            $connectionCloseListener = $body->close(...);
 
             $this->connection->on('close', $connectionCloseListener);
 
-            $body->on('data', function (string $chunk) use ($isChunkedResponse) {
+            $drainListener = $body->resume(...);
+            $this->connection->on('drain', $drainListener);
+
+            $body->on('data', function (string $chunk) use ($isChunkedResponse, $body) {
                 if ($isChunkedResponse) {
-                    $this->connection->write(dechex(\strlen($chunk)) . "\r\n" . $chunk . "\r\n");
+                    $canContinue = $this->connection->write(dechex(\strlen($chunk)) . "\r\n" . $chunk . "\r\n");
                 } else {
-                    $this->connection->write($chunk);
+                    $canContinue = $this->connection->write($chunk);
+                }
+
+                if ($canContinue === false) {
+                    $body->pause();
                 }
             });
 
-            $body->on('end', function () use ($isChunkedResponse, $shouldClose, $connectionCloseListener) {
+            $body->on('end', function () use ($isChunkedResponse, $shouldClose, $connectionCloseListener, $drainListener) {
                 $this->connection->removeListener('close', $connectionCloseListener);
+                $this->connection->removeListener('drain', $drainListener);
 
                 $finalChunk = $isChunkedResponse ? "0\r\n\r\n" : '';
                 if ($shouldClose) {
@@ -361,6 +367,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $body->on('close', function () use ($connectionCloseListener) {
                 $this->connection->removeListener('close', $connectionCloseListener);
             });
+
+            $body->resume();
         }
     }
 

@@ -10,6 +10,8 @@ use Hibla\HttpServer\Message\Request as ServerRequest;
 use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\HttpServer\Message\SseStream as ServerSseStream;
 use Hibla\Promise\Promise;
+use Hibla\Socket\Connector;
+use Hibla\Stream\Stream;
 use Hibla\Stream\ThroughStream;
 
 use function Hibla\await;
@@ -264,6 +266,47 @@ describe('Browser-Like Simulation', function () {
             $socket->close();
         }
     });
+
+    it('supports true duplex streaming by piping an incoming request stream directly to an outgoing response stream', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $reqBody = $request->getBody();
+            $resBody = new ThroughStream();
+
+            $reqBody->pipe($resBody);
+
+            return new ServerResponse(200, [], $resBody);
+        }, maxBodySize: 10485760, streamingRequests: true);
+
+        try {
+            $rawClient = new Connector();
+
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $connection->write("POST /duplex HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
+
+            $connection->write("5\r\nhello\r\n");
+
+            $echoPromise = new Promise(function ($resolve) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
+                    $buffer .= $chunk;
+                    if (str_contains($buffer, 'hello')) {
+                        $resolve($buffer);
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($echoPromise);
+
+            expect($rawResponse)->toContain('HTTP/1.1 200 OK')
+                ->and($rawResponse)->toContain('Transfer-Encoding: chunked')
+                ->and($rawResponse)->toContain("5\r\nhello\r\n")
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
 });
 
 describe('Advanced Client-Server Interactions', function () {
@@ -372,6 +415,185 @@ describe('Advanced Client-Server Interactions', function () {
                 ->and($teapot->body())->toBe('Short and stout')
             ;
         } finally {
+            $socket->close();
+        }
+    });
+
+    it('performs strict content negotiation based on the Accept request header', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $accept = $request->getHeaderLine('Accept');
+
+            if (str_contains($accept, 'application/json')) {
+                return ServerResponse::json(['format' => 'json']);
+            }
+            if (str_contains($accept, 'application/xml')) {
+                return new ServerResponse(200, ['Content-Type' => 'application/xml'], '<format>xml</format>');
+            }
+
+            return ServerResponse::plaintext('format: plain');
+        });
+
+        try {
+            $jsonRes = await(Http::client()->accept('application/json')->get($url));
+            expect($jsonRes->status())->toBe(200)
+                ->and($jsonRes->header('content-type'))->toBe('application/json')
+                ->and($jsonRes->json('format'))->toBe('json')
+            ;
+
+            $xmlRes = await(Http::client()->accept('application/xml')->get($url));
+            expect($xmlRes->status())->toBe(200)
+                ->and($xmlRes->header('content-type'))->toBe('application/xml')
+                ->and($xmlRes->body())->toBe('<format>xml</format>')
+            ;
+
+            $plainRes = await(Http::client()->get($url));
+            expect($plainRes->status())->toBe(200)
+                ->and($plainRes->body())->toBe('format: plain')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('supports true duplex streaming by piping an incoming request stream directly to an outgoing response stream', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $reqBody = $request->getBody();
+            $resBody = new ThroughStream();
+            $reqBody->pipe($resBody);
+
+            return new ServerResponse(200, [], $resBody);
+        }, maxBodySize: 10485760, streamingRequests: true);
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+            $connection->write("POST /duplex HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
+
+            $connection->write("5\r\nhello\r\n");
+
+            $echoPromise = new Promise(function ($resolve) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
+                    $buffer .= $chunk;
+                    if (str_contains($buffer, 'hello')) {
+                        $resolve($buffer);
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($echoPromise);
+
+            expect($rawResponse)->toContain('HTTP/1.1 200 OK')
+                ->and($rawResponse)->toContain('Transfer-Encoding: chunked')
+                ->and($rawResponse)->toContain("5\r\nhello\r\n")
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('safely handles slow clients that dribble request bodies over time', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            return ServerResponse::plaintext("Received: " . $request->getBody());
+        });
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n");
+
+            Loop::addTimer(0.01, fn() => $connection->write("Slo"));
+            Loop::addTimer(0.02, fn() => $connection->write("w "));
+            Loop::addTimer(0.03, fn() => $connection->write("Client"));
+
+            $responsePromise = new Promise(function ($resolve) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
+                    $buffer .= $chunk;
+                    if (str_contains($buffer, 'Received: Slow Client')) {
+                        $resolve($buffer);
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($responsePromise);
+
+            expect($rawResponse)->toContain('HTTP/1.1 200 OK')
+                ->and($rawResponse)->toContain('Received: Slow Client');
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('modifies streaming request data on-the-fly using a ThroughStream transformer', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $reqBody = $request->getBody();
+
+            $uppercaseStream = new ThroughStream(function (string $chunk) {
+                return strtoupper($chunk);
+            });
+
+            $reqBody->pipe($uppercaseStream);
+
+            return new ServerResponse(200, [], $uppercaseStream);
+        }, streamingRequests: true);
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $connection->write("POST /transform HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
+
+            $connection->write("5\r\nhello\r\n");
+            $connection->write("6\r\n world\r\n");
+            $connection->write("0\r\n\r\n");
+
+            $responsePromise = new Promise(function ($resolve) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
+                    $buffer .= $chunk;
+                    if (str_contains($buffer, "0\r\n\r\n")) {
+                        $resolve($buffer);
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($responsePromise);
+
+            expect($rawResponse)->toContain('HTTP/1.1 200 OK')
+                ->and($rawResponse)->toContain('HELLO')
+                ->and($rawResponse)->toContain(' WORLD');
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('serves static files asynchronously from disk without loading them into memory', function () {
+        $tmpFile = tempnam(sys_get_temp_dir(), 'hibla_static_');
+        $fileContent = str_repeat("Hello Hibla!\n", 75000);
+        file_put_contents($tmpFile, $fileContent);
+
+        [$socket, $url] = createTestServer(function (ServerRequest $request) use ($tmpFile) {
+            $fileStream = Stream::readableFile($tmpFile);
+
+            return new ServerResponse(200, [
+                'Content-Type' => 'text/plain',
+                'Content-Length' => (string) filesize($tmpFile)
+            ], $fileStream);
+        });
+
+        try {
+            $response = await(Http::get($url));
+
+            expect($response->status())->toBe(200)
+                ->and(strlen($response->body()))->toBe(strlen($fileContent))
+                ->and($response->body())->toBe($fileContent);
+        } finally {
+            @unlink($tmpFile);
             $socket->close();
         }
     });
