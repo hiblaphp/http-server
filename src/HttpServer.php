@@ -14,6 +14,7 @@ use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Parallel\Parallel;
+use Hibla\Parallel\ValueObjects\WorkerMessage;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\Interfaces\ServerInterface;
 use Hibla\Socket\LimitingServer;
@@ -499,7 +500,13 @@ final class HttpServer implements HttpServerInterface
             ));
         };
 
-        $pool = Parallel::pool(size: $workers)->withoutTimeout();
+        $pool = Parallel::pool(size: $workers)
+            ->onMessage(function (WorkerMessage $message) {
+                $data = $message->data;
+                if (\is_array($data) && ($data['type'] ?? '') === 'log') {
+                    $this->log("[Worker {$message->pid}] {$data['message']}");
+                }
+            });
 
         if ($this->workerMemoryLimit !== null) {
             $pool = $pool->withMemoryLimit($this->workerMemoryLimit);

@@ -8,6 +8,7 @@ use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\HttpServer;
 use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
+use function Hibla\emit;
 
 /**
  * @internal
@@ -46,8 +47,7 @@ final class ServerWorkerTask
         private readonly ?float $keepAliveTimeout = null,
         private readonly mixed $onStartCallback = null,
         private readonly float $gracefulShutdownTimeout = 15.0
-    ) {
-    }
+    ) {}
 
     public function __invoke(): void
     {
@@ -89,6 +89,13 @@ final class ServerWorkerTask
                 $socket->close();
 
                 $activeCount = $triggerShutdown();
+                if ($activeCount > 0) {
+                    emit([
+                        'type' => 'log',
+                        'message' => "Worker is draining {$activeCount} active connection(s) before exit."
+                    ]);
+                }
+
                 if ($activeCount === 0) {
                     Loop::stop();
 
