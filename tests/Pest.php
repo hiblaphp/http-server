@@ -88,6 +88,36 @@ function mockStreamingConnection(string &$buffer): ConnectionInterface
     return $connection;
 }
 
+function createCloseableMockConnection(string &$buffer): ConnectionInterface
+{
+    $connection = Mockery::mock(ConnectionInterface::class);
+    $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
+
+    $closeListeners = [];
+    $connection->shouldReceive('on')->zeroOrMoreTimes()->andReturnUsing(function (string $event, callable $listener) use (&$closeListeners) {
+        if ($event === 'close') {
+            $closeListeners[] = $listener;
+        }
+    });
+
+    $triggerClose = function () use (&$closeListeners) {
+        foreach ($closeListeners as $listener) {
+            $listener();
+        }
+    };
+
+    $connection->shouldReceive('close')->zeroOrMoreTimes()->andReturnUsing($triggerClose);
+
+    $connection->shouldReceive('end')->andReturnUsing(function (?string $data = null) use (&$buffer, $triggerClose) {
+        if ($data !== null) {
+            $buffer .= $data;
+        }
+        $triggerClose();
+    });
+
+    return $connection;
+}
+
 /**
  * @return array{0: SocketServer, 1: string}
  */

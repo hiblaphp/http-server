@@ -597,7 +597,7 @@ final class HttpServer implements HttpServerInterface
      *
      * @internal This is for internal usage and testing purposes.
      *
-     * @return \Closure A callback that triggers graceful shutdown and returns the active connection count.
+     * @return callable():int A callback that triggers graceful shutdown and returns the active connection count.
      */
     public static function attachProtocolHandler(
         ServerInterface $socket,
@@ -608,7 +608,7 @@ final class HttpServer implements HttpServerInterface
         int $maxHeaderCount = 100,
         ?float $headerTimeout = null,
         ?float $keepAliveTimeout = null
-    ): \Closure {
+    ): callable {
         $activeHandlers = [];
 
         $socket->on('connection', static function (ConnectionInterface $connection) use ($requestHandler, $maxBodySize, $streamingRequests, $maxHeaderSize, $maxHeaderCount, $headerTimeout, $keepAliveTimeout, &$activeHandlers) {
