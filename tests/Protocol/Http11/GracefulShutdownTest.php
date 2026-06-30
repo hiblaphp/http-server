@@ -188,4 +188,23 @@ describe('Protocol-level Graceful Shutdown', function () {
             ->and($buffer)->toContain("0\r\n\r\n")
         ;
     });
+
+    it('immediately closes connections that are mid-header-upload during shutdown', function () {
+        $buffer = '';
+        $connection = createCloseableMockConnection($buffer);
+        $wasClosed = false;
+
+        $connection->on('close', function () use (&$wasClosed) {
+            $wasClosed = true;
+        });
+
+        $handler = new Http11ProtocolHandler($connection, function () {});
+
+        // Send a partial request line (client is dripping headers slowly)
+        $handler->handleData("GET /slow-path HT");
+
+        $handler->gracefulShutdown();
+
+        expect($wasClosed)->toBeTrue();
+    });
 });
