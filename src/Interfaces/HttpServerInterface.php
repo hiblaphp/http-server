@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Interfaces;
 
+use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ServerInterface;
 
 /**
@@ -189,7 +191,7 @@ interface HttpServerInterface
     /**
      * Start the HTTP Server and block the current thread to process incoming requests.
      *
-     * @param callable $requestHandler Callback invoked for each incoming request.
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler Callback invoked for each incoming request.
      *
      * @return void
      */

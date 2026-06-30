@@ -6,6 +6,9 @@ namespace Hibla\HttpServer\Internals;
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\HttpServer;
+use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
+use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
 
@@ -25,7 +28,7 @@ final class ServerWorkerTask
     /**
      * @param string $uri
      * @param array<string, mixed> $context
-     * @param callable $requestHandler
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler Callback invoked for each incoming request.
      * @param int $maxBodySize Limit for request body buffering in bytes (Default: 10MB)
      * @param bool $streamingRequests True to enable streaming request bodies
      * @param int|null $connectionLimit

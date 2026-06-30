@@ -30,12 +30,12 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
     private ?Http11ProtocolHandler $protocolHandler = null;
 
     /**
-     * @var callable(Request, ProtocolHandlerInterface): Response
+     * @var callable(Request, ProtocolHandlerInterface): (Response|null)
      */
     private $requestHandler;
 
     /**
-     * @param callable(Request, ProtocolHandlerInterface): Response $requestHandler
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
      */
     public function __construct(
         callable $requestHandler,
