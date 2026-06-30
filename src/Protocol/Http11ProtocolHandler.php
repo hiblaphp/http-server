@@ -584,13 +584,14 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return false;
         }
 
-        if ($this->currentRequest === null) {
+        $request = $this->currentRequest;
+        if ($request === null) {
             return false;
         }
 
         // RFC 9110 Section 10.1.1: Automatically signal the client to send the body
         // if the headers were successfully parsed and accepted.
-        if (strtolower($this->currentRequest->getHeaderLine('expect')) === '100-continue') {
+        if (strtolower($request->getHeaderLine('expect')) === '100-continue') {
             if ($this->onEarlyResponse !== null) {
                 ($this->onEarlyResponse)("HTTP/1.1 100 Continue\r\n\r\n");
             } else {
@@ -602,11 +603,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $this->bodyStream = new RequestBodyStream();
             $this->bodyStream->on('pause', $this->connection->pause(...));
             $this->bodyStream->on('resume', $this->connection->resume(...));
-            $this->currentRequest->setBody($this->bodyStream);
+            $request->setBody($this->bodyStream);
 
             $this->activeRequestsCount++;
             if (\is_callable($this->onRequest)) {
-                ($this->onRequest)($this->currentRequest, $this);
+                ($this->onRequest)($request, $this);
             }
         }
 

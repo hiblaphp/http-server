@@ -619,16 +619,18 @@ final class HttpServer implements HttpServerInterface
 
         $socket->on('connection', static function (ConnectionInterface $connection) use ($requestHandler, $maxBodySize, $streamingRequests, $maxHeaderSize, $maxHeaderCount, $headerTimeout, $keepAliveTimeout, &$activeHandlers) {
 
+            /** @var list<\stdClass> $pipelineQueue */
             $pipelineQueue = [];
             $isFlushing = false;
             $maxPipelineDepth = 10;
 
+            /** @var (\Closure(): void)|null $flushQueue */
             $flushQueue = null;
             /** @var Http11ProtocolHandler|null $protocolHandler */
             $protocolHandler = null;
 
             $flushQueue = static function () use (&$pipelineQueue, &$isFlushing, &$flushQueue, &$protocolHandler, $maxPipelineDepth, $connection) {
-                if ($isFlushing || empty($pipelineQueue) || $protocolHandler === null) {
+                if ($isFlushing || $pipelineQueue === [] || $protocolHandler === null) {
                     return;
                 }
 
@@ -647,17 +649,19 @@ final class HttpServer implements HttpServerInterface
                         $connection->resume();
                     }
 
-                    if ($flushQueue !== null) {
+                    if ($flushQueue !== null) { // @phpstan-ignore notIdentical.alwaysTrue
                         $flushQueue();
                     }
                 };
 
                 if ($head->isEarly) {
                     // Instantly write "100 Continue" payloads in correct sequence
-                    $connection->write($head->data);
+                    if (is_string($head->data)) {
+                        $connection->write($head->data);
+                    }
                     $onComplete();
                 } else {
-                    if ($head->response !== null && ! $protocolHandler->isUpgraded()) {
+                    if ($head->response instanceof Response && ! $protocolHandler->isUpgraded()) {
                         try {
                             $protocolHandler->writeResponse($head->response, $onComplete);
                         } catch (\Throwable $e) {
@@ -671,9 +675,7 @@ final class HttpServer implements HttpServerInterface
                         }
                     } else {
                         // Drop safely if response is null (Connection Upgraded)
-                        if ($protocolHandler !== null) {
-                            $protocolHandler->decrementActiveRequests();
-                        }
+                        $protocolHandler->decrementActiveRequests();
                         $onComplete();
                     }
                 }
@@ -722,7 +724,7 @@ final class HttpServer implements HttpServerInterface
                         }
                     }
 
-                    if ($flushQueue !== null) {
+                    if ($flushQueue !== null) { // @phpstan-ignore notIdentical.alwaysTrue
                         $flushQueue();
                     }
                 });
@@ -742,7 +744,7 @@ final class HttpServer implements HttpServerInterface
                     $connection->pause();
                 }
 
-                if ($flushQueue !== null) {
+                if ($flushQueue !== null) { // @phpstan-ignore notIdentical.alwaysTrue
                     $flushQueue();
                 }
             };
