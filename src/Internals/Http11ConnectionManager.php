@@ -25,8 +25,6 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
     private bool $isFlushing = false;
 
-    private int $maxPipelineDepth = 10;
-
     private ?Http11ProtocolHandler $protocolHandler = null;
 
     /**
@@ -44,7 +42,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         private readonly int $maxHeaderSize = 8192,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
-        private readonly ?float $keepAliveTimeout = null
+        private readonly ?float $keepAliveTimeout = null,
+        private readonly int $maxConcurrentRequestsPerConnection = 128
     ) {
         $this->requestHandler = $requestHandler;
     }
@@ -70,7 +69,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
             $this->pipelineQueue[] = $item;
 
-            if (\count($this->pipelineQueue) >= $this->maxPipelineDepth) {
+            if (\count($this->pipelineQueue) >= $this->maxConcurrentRequestsPerConnection) {
                 $connection->pause();
             }
 
@@ -116,7 +115,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         $item = new Http11PipelineItem();
         $this->pipelineQueue[] = $item;
 
-        if (\count($this->pipelineQueue) >= $this->maxPipelineDepth) {
+        if (\count($this->pipelineQueue) >= $this->maxConcurrentRequestsPerConnection) {
             $protocol->getConnection()->pause();
         }
 
@@ -164,7 +163,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             array_shift($this->pipelineQueue);
             $this->isFlushing = false;
 
-            if (\count($this->pipelineQueue) < $this->maxPipelineDepth) {
+            if (\count($this->pipelineQueue) < $this->maxConcurrentRequestsPerConnection) {
                 $connection->resume();
             }
 

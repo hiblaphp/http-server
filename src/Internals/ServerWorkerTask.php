@@ -50,9 +50,9 @@ final class ServerWorkerTask
         private readonly ?float $headerTimeout = null,
         private readonly ?float $keepAliveTimeout = null,
         private readonly mixed $onStartCallback = null,
-        private readonly float $gracefulShutdownTimeout = 15.0
-    ) {
-    }
+        private readonly float $gracefulShutdownTimeout = 15.0,
+        private readonly int $maxConcurrentRequestsPerConnection = 128
+    ) {}
 
     public function __invoke(): void
     {
@@ -78,7 +78,8 @@ final class ServerWorkerTask
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
-            $this->keepAliveTimeout
+            $this->keepAliveTimeout,
+            $this->maxConcurrentRequestsPerConnection
         );
 
         $gracefulShutdownTimeout = $this->gracefulShutdownTimeout;

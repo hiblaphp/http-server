@@ -189,6 +189,17 @@ interface HttpServerInterface
     public function withGracefulShutdownTimeout(float $seconds): static;
 
     /**
+     * Set the maximum number of concurrent requests allowed per connection.
+     * 
+     * In HTTP/1.1, this limits the depth of the pipeline queue.
+     * In HTTP/2, this dictates the SETTINGS_MAX_CONCURRENT_STREAMS limit.
+     * 
+     * @param int $limit Maximum concurrent requests (Default: 10)
+     * @return static
+     */
+    public function withMaxConcurrentRequestsPerConnection(int $limit): static;
+
+    /**
      * Start the HTTP Server and block the current thread to process incoming requests.
      *
      * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler Callback invoked for each incoming request.

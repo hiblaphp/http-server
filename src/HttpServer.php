@@ -67,6 +67,11 @@ final class HttpServer implements HttpServerInterface
     private ?int $workerRestartLimit = 10;
 
     /**
+     * @var int Limit for concurrent requests per TCP connection
+     */
+    private int $maxConcurrentRequestsPerConnection = 128;
+
+    /**
      * @var int Limit for request body buffering in bytes (Default: 10MB)
      */
     private int $maxBodySize = 10485760;
@@ -111,6 +116,21 @@ final class HttpServer implements HttpServerInterface
     public static function create(string|int $address = '0.0.0.0:8000'): self
     {
         return new self($address);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function withMaxConcurrentRequestsPerConnection(int $limit): static
+    {
+        if ($limit < 1) {
+            throw new InvalidConfigurationException('Concurrent requests limit must be at least 1.');
+        }
+
+        $clone = clone $this;
+        $clone->maxConcurrentRequestsPerConnection = $limit;
+
+        return $clone;
     }
 
     /**
@@ -507,8 +527,7 @@ final class HttpServer implements HttpServerInterface
                 ) {
                     $this->log("[Worker {$message->pid}] {$data['message']}");
                 }
-            })
-        ;
+            });
 
         if ($this->workerMemoryLimit !== null) {
             $pool = $pool->withMemoryLimit($this->workerMemoryLimit);
@@ -607,7 +626,8 @@ final class HttpServer implements HttpServerInterface
         int $maxHeaderSize = 8192,
         int $maxHeaderCount = 100,
         ?float $headerTimeout = null,
-        ?float $keepAliveTimeout = null
+        ?float $keepAliveTimeout = null,
+        int $maxConcurrentRequestsPerConnection = 128
     ): callable {
         /** @var array<int, ConnectionManagerInterface> $activeManagers */
         $activeManagers = [];
@@ -620,6 +640,7 @@ final class HttpServer implements HttpServerInterface
             $maxHeaderCount,
             $headerTimeout,
             $keepAliveTimeout,
+            $maxConcurrentRequestsPerConnection,
             &$activeManagers,
         ): void {
 
@@ -630,7 +651,8 @@ final class HttpServer implements HttpServerInterface
                 $maxHeaderSize,
                 $maxHeaderCount,
                 $headerTimeout,
-                $keepAliveTimeout
+                $keepAliveTimeout,
+                $maxConcurrentRequestsPerConnection
             );
 
             $managerId = spl_object_id($manager);
