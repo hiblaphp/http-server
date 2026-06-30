@@ -510,7 +510,8 @@ final class HttpServer implements HttpServerInterface
                 ) {
                     $this->log("[Worker {$message->pid}] {$data['message']}");
                 }
-            });
+            })
+        ;
 
         if ($this->workerMemoryLimit !== null) {
             $pool = $pool->withMemoryLimit($this->workerMemoryLimit);
@@ -656,7 +657,7 @@ final class HttpServer implements HttpServerInterface
 
                 if ($head->isEarly) {
                     // Instantly write "100 Continue" payloads in correct sequence
-                    if (is_string($head->data)) {
+                    if (\is_string($head->data)) {
                         $connection->write($head->data);
                     }
                     $onComplete();

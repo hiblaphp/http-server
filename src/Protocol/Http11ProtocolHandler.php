@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Hibla\HttpServer\Protocol;
 
 use Hibla\EventLoop\Loop;
+use Hibla\HttpServer\Exceptions\InvalidResponseException;
 use Hibla\HttpServer\Exceptions\MessageParsingException;
 use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Exceptions\RequestHeaderFieldsTooLargeException;
@@ -14,6 +15,7 @@ use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ConnectionInterface;
+use Hibla\Stream\Interfaces\ReadableStreamInterface;
 
 /**
  * HTTP/1.1 protocol handler responsible for parsing inbound TCP streams into
@@ -251,7 +253,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         }
 
-        // Compact the dead consumed prefix exactly once per TCP read event — rather than
+        // Compact the dead consumed prefix exactly once per TCP read event rather than
         // after every phase transition and keeping total allocation to a single substr call.
         $this->compactBuffer();
     }
@@ -283,58 +285,20 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         $body = $response->getBody();
         $isStreamingOut = ! \is_string($body);
-        $version = $response->getProtocolVersion() === '1.1' ? $this->activeResponseVersion : $response->getProtocolVersion();
-        $headers = $response->getHeaders();
-
-        if (! isset($headers['server'])) {
-            $headers['server'] = ['Hibla/1.0'];
-        }
-
         $isChunkedResponse = false;
+        $shouldClose = false;
 
-        if ($isStreamingOut && ! isset($headers['content-length'])) {
-            $isChunkedResponse = true;
-            $headers['transfer-encoding'] = ['chunked'];
-        } elseif (! $isStreamingOut && ! isset($headers['content-length']) && $response->getStatusCode() !== 101) {
-            $headers['content-length'] = [(string) \strlen((string) $body)];
-        }
-
-        $shouldClose = $this->willCloseConnection || strtolower($response->getHeaderLine('connection')) === 'close';
-
-        if ($shouldClose) {
-            $headers['connection'] = ['close'];
-        } elseif ($version === '1.0' && ! isset($headers['connection'])) {
-            $headers['connection'] = ['keep-alive'];
-        }
-
-        $lines = ["HTTP/{$version} {$response->getStatusCode()} {$response->getReasonPhrase()}"];
-
-        foreach ($headers as $name => $values) {
-            $displayName = self::formatHeaderNameForWire($name);
-            foreach ((array) $values as $value) {
-                $strValue = (string) $value;
-
-                // SECURITY BOUNDARY: Throw if the application outputs unsafe control characters.
-                // Prevents HTTP Response Splitting and Alerts the developer.
-                if (preg_match('/[\r\n\0]/', $strValue) === 1) {
-                    throw new \Hibla\HttpServer\Exceptions\InvalidResponseException(
-                        "Header value for '{$name}' contains invalid control characters (CR, LF, or NUL)"
-                    );
-                }
-
-                $lines[] = "{$displayName}: {$strValue}";
-            }
-        }
-
-        $headerBlock = implode("\r\n", $lines) . "\r\n\r\n";
+        $headerBlock = $this->compileResponseHeaders($response, $isStreamingOut, $isChunkedResponse, $shouldClose);
 
         $completeCalled = false;
         $triggerComplete = function () use (&$completeCalled, $onComplete) {
             if (! $completeCalled) {
                 $completeCalled = true;
+
                 if ($this->activeRequestsCount > 0) {
                     $this->activeRequestsCount--;
                 }
+
                 if ($onComplete !== null) {
                     $onComplete();
                 }
@@ -342,87 +306,9 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         };
 
         if (\is_string($body)) {
-            if ($shouldClose) {
-                $this->connection->end($headerBlock . $body);
-                $this->state = self::STATE_UPGRADED;
-            } else {
-                $this->connection->write($headerBlock . $body);
-                $this->handleKeepAliveState();
-            }
-            $triggerComplete();
+            $this->writeStringResponse($headerBlock, $body, $shouldClose, $triggerComplete);
         } else {
-            if (! $body->isReadable()) {
-                $finalPayload = $headerBlock;
-                if ($isChunkedResponse) {
-                    $finalPayload .= "0\r\n\r\n";
-                }
-
-                if ($shouldClose) {
-                    $this->connection->end($finalPayload);
-                    $this->state = self::STATE_UPGRADED;
-                } else {
-                    $this->connection->write($finalPayload);
-                    $this->handleKeepAliveState();
-                }
-                $triggerComplete();
-
-                return;
-            }
-
-            $this->connection->write($headerBlock);
-
-            $connectionCloseListener = $body->close(...);
-            $this->connection->on('close', $connectionCloseListener);
-
-            $drainListener = $body->resume(...);
-            $this->connection->on('drain', $drainListener);
-
-            $body->on('data', function (string $chunk) use ($isChunkedResponse, $body) {
-                if ($isChunkedResponse) {
-                    $canContinue = $this->connection->write(dechex(\strlen($chunk)) . "\r\n" . $chunk . "\r\n");
-                } else {
-                    $canContinue = $this->connection->write($chunk);
-                }
-
-                if ($canContinue === false) {
-                    $body->pause();
-                }
-            });
-
-            $body->on('end', function () use ($isChunkedResponse, $shouldClose, $connectionCloseListener, $drainListener, $triggerComplete) {
-                $this->connection->removeListener('close', $connectionCloseListener);
-                $this->connection->removeListener('drain', $drainListener);
-
-                $finalChunk = $isChunkedResponse ? "0\r\n\r\n" : '';
-
-                if ($shouldClose || $this->willCloseConnection) {
-                    if ($finalChunk !== '') {
-                        $this->connection->end($finalChunk);
-                    } else {
-                        $this->connection->end();
-                    }
-                    $this->state = self::STATE_UPGRADED;
-                } else {
-                    if ($finalChunk !== '') {
-                        $this->connection->write($finalChunk);
-                    }
-                    $this->handleKeepAliveState();
-                }
-                $triggerComplete();
-            });
-
-            $body->on('error', function () use ($connectionCloseListener, $triggerComplete) {
-                $this->connection->removeListener('close', $connectionCloseListener);
-                $this->connection->close();
-                $triggerComplete();
-            });
-
-            $body->on('close', function () use ($connectionCloseListener, $triggerComplete) {
-                $this->connection->removeListener('close', $connectionCloseListener);
-                $triggerComplete();
-            });
-
-            $body->resume();
+            $this->writeStreamResponse($body, $headerBlock, $isChunkedResponse, $shouldClose, $triggerComplete);
         }
     }
 
@@ -503,22 +389,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     }
 
     /**
-     * Ensure the Protcol Parser able to gracefully handle client connection abrupt closing gracefully.
-     */
-    private function handleConnectionCloseEvent(): void
-    {
-        $this->connection->on('close', function () {
-            $this->cancelAllTimers();
-
-            if ($this->bodyStream !== null && $this->bodyStream->isReadable()) {
-                $this->bodyStream->close();
-            }
-
-            $this->state = self::STATE_UPGRADED;
-        });
-    }
-
-    /**
      * Extracts the raw header block from the incoming TCP buffer.
      *
      * Complies with RFC 9112 section 2.2 by stripping any leading empty lines (bare CRLFs)
@@ -585,6 +455,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         }
 
         $request = $this->currentRequest;
+
         if ($request === null) {
             return false;
         }
@@ -661,8 +532,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * the trailer section once the terminal zero-size chunk is encountered.
      *
      * Enforces strict ctype_xdigit verification to mitigate TE.TE smuggling vectors.
-     *
-     * @return bool True if a chunk size was parsed, false if waiting for more data.
      */
     private function parseChunkSizePhase(): bool
     {
@@ -681,16 +550,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $extPos = strpos($line, ';');
         $hex = $extPos !== false ? rtrim(substr($line, 0, $extPos)) : trim($line);
 
-        if ($hex === '' || ! ctype_xdigit($hex)) {
-            $this->sendErrorAndClose(400, 'Bad Request');
-
-            return false;
-        }
-
-        //hex strings >= 16 digits exceed PHP_INT_MAX on 64-bit systems.
-        // hexdec() silently returns a float; (int) cast produces platform-dependent
-        // garbage (typically -1 or PHP_INT_MIN) that corrupts the chunk-data read path.
-        if (\strlen($hex) > 15) {
+        if ($hex === '' || ! ctype_xdigit($hex) || \strlen($hex) > 15) {
             $this->sendErrorAndClose(400, 'Bad Request');
 
             return false;
@@ -798,8 +658,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     /**
      * Consumes the chunked trailer section (RFC 9112 section 7.1.2).
-     *
-     * @return bool True if the trailer section was fully consumed, false otherwise.
      */
     private function parseChunkTrailerPhase(): bool
     {
@@ -834,66 +692,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     }
 
     /**
-     * Pushes a body chunk to either the live stream or the buffered chunk list.
-     *
-     * @return bool False if this push triggered a 413 and closed the connection
-     */
-    private function pushBodyData(string $data): bool
-    {
-        if ($this->currentRequest === null) {
-            return true;
-        }
-
-        if ($this->streamingRequests && $this->bodyStream !== null) {
-            $this->bodyStream->push($data);
-
-            return true;
-        }
-
-        $this->bufferedBodyBytes += \strlen($data);
-
-        if ($this->bufferedBodyBytes > $this->maxBodySize) {
-            $this->sendErrorAndClose(413, 'Payload Too Large');
-
-            return false;
-        }
-
-        $this->bodyChunks[] = $data;
-
-        return true;
-    }
-
-    private function finalizeRequest(): void
-    {
-        if ($this->currentRequest === null) {
-            return;
-        }
-
-        if ($this->streamingRequests && $this->bodyStream !== null) {
-            $this->bodyStream->end();
-        } else {
-            $this->currentRequest->setBody(implode('', $this->bodyChunks));
-
-            $this->activeRequestsCount++;
-            if (\is_callable($this->onRequest)) {
-                ($this->onRequest)($this->currentRequest, $this);
-            }
-        }
-
-        if ($this->state !== self::STATE_UPGRADED) {
-            $this->state = self::STATE_HEADERS;
-        }
-
-        $this->currentRequest = null;
-        $this->bodyStream = null;
-        $this->bodyChunks = [];
-        $this->isChunked = false;
-        $this->expectedBodyLength = 0;
-        $this->bytesRead = 0;
-        $this->bufferedBodyBytes = 0;
-    }
-
-    /**
      * Parses the raw header block into a Request value object.
      *
      * This method strictly applies RFC 9112 structural validations. Violations result
@@ -911,8 +709,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * - section 6.3: Validates TE chains. 400 Bad Request if recognized but not chunked-terminated, 501 if unrecognized.
      * - section 6.3: Removes Content-Length entirely if Transfer-Encoding is present.
      * - section 4:   chunked MUST appear exactly once and MUST be the final coding (TE.TE smuggling prevention).
-     *
-     * @param string $rawHeaders The raw HTTP header string including the request line.
      *
      * @throws MessageParsingException If any structural validation fails.
      * @throws UnsupportedTransferCodingException If Transfer-Encoding names an unrecognized coding.
@@ -943,24 +739,44 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $target = substr($requestLine, $s1 + 1, $s2 - $s1 - 1);
         $version = substr($requestLine, $s2 + 1);
 
-        if ($method === '' || preg_match('/[^\x21-\x7E]|[()<>@,;:\\\\"\/\[\]?={}]/', $method) === 1) {
+        if (! self::isValidToken($method)) {
             throw new MessageParsingException('Invalid characters in request method');
         }
 
-        if ($target === '' || preg_match('/[\x00-\x1F\x7F]/', $target) === 1) {
+        if (! self::isValidRequestTarget($target)) {
             throw new MessageParsingException('Invalid control character in request target');
         }
 
-        if (
-            \strlen($version) !== 8
-            || strncmp($version, 'HTTP/', 5) !== 0
-            || $version[6] !== '.'
-            || ! ctype_digit($version[5])
-            || ! ctype_digit($version[7])
-        ) {
+        if (! self::isValidHttpVersion($version)) {
             throw new MessageParsingException('Invalid HTTP version: must match HTTP/DIGIT.DIGIT');
         }
 
+        $headers = $this->extractHeaderFields($headerBody);
+        $protocolVersion = substr($version, 5);
+
+        self::validateHostHeaderRequirement($headers, $protocolVersion);
+
+        $this->isChunked = false;
+        $this->expectedBodyLength = 0;
+        $forceClose = false;
+
+        $this->processFramingHeaders($headers, $protocolVersion, $forceClose);
+
+        $serverParams = ['REMOTE_ADDR' => $this->connection->getRemoteAddress()];
+        $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
+
+        $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
+
+        if (! $this->streamingRequests && $this->expectedBodyLength > $this->maxBodySize) {
+            throw new PayloadTooLargeException('Payload Too Large');
+        }
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    private function extractHeaderFields(string $headerBody): array
+    {
         $headers = [];
         $offset = 0;
         $headerBodyLen = \strlen($headerBody);
@@ -1018,35 +834,25 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             // trailing SP/HT, but the token rule is broader so null bytes, other controls,
             // and delimiter chars must also be rejected to prevent proxy differential attacks
             // where a front-end normalizes a malformed name that this parser silently accepted.
-            if ($rawFieldName === '' || preg_match('/[^\x21-\x7E]|[()<>@,;:\\\\"\/\[\]?={}]/', $rawFieldName) === 1) {
+            if (! self::isValidToken($rawFieldName)) {
                 throw new MessageParsingException("Invalid characters in field name: \"{$rawFieldName}\"");
             }
 
-            if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $fieldValue) === 1) {
+            if (! self::isValidHeaderValue($fieldValue)) {
                 throw new MessageParsingException("Invalid control character in header field value for: \"{$rawFieldName}\"");
             }
 
             $headers[strtolower($rawFieldName)][] = $fieldValue;
         }
 
-        $protocolVersion = substr($version, 5);
+        return $headers;
+    }
 
-        if ($protocolVersion === '1.1') {
-            if (! isset($headers['host'])) {
-                throw new MessageParsingException('HTTP/1.1 requests MUST include a Host header field');
-            }
-            if (\count($headers['host']) > 1) {
-                throw new MessageParsingException('HTTP/1.1 requests MUST NOT contain more than one Host header field');
-            }
-            if (str_contains($headers['host'][0], ',')) {
-                throw new MessageParsingException('Host header field must not contain a comma-separated list');
-            }
-        }
-
-        $this->isChunked = false;
-        $this->expectedBodyLength = 0;
-        $forceClose = false;
-
+    /**
+     * @param array<string, list<string>> $headers
+     */
+    private function processFramingHeaders(array &$headers, string $protocolVersion, bool &$forceClose): void
+    {
         $hasTe = isset($headers['transfer-encoding']);
         $hasCl = isset($headers['content-length']);
 
@@ -1116,7 +922,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $clVals = $headers['content-length'];
 
             if (\count($clVals) === 1 && ! str_contains($clVals[0], ',')) {
-                $this->expectedBodyLength = $this->parseContentLengthValue($clVals[0]);
+                $this->expectedBodyLength = self::parseContentLengthValue($clVals[0]);
             } else {
                 $clRaw = [];
                 foreach ($clVals as $val) {
@@ -1133,48 +939,213 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                     throw new MessageParsingException('Multiple conflicting Content-Length values');
                 }
 
-                $this->expectedBodyLength = $this->parseContentLengthValue((string) reset($uniqueCl));
+                $this->expectedBodyLength = self::parseContentLengthValue((string) reset($uniqueCl));
             }
         }
+    }
 
-        $serverParams = ['REMOTE_ADDR' => $this->connection->getRemoteAddress()];
-        $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
-
-        $connHeader = strtolower($this->currentRequest->getHeaderLine('connection'));
-        if ($this->currentRequest->getProtocolVersion() === '1.0') {
+    private function determineConnectionPersistence(string $protocolVersion, string $connHeader, bool $forceClose): void
+    {
+        $connHeader = strtolower($connHeader);
+        if ($protocolVersion === '1.0') {
             $this->willCloseConnection = $forceClose || ($connHeader !== 'keep-alive');
             $this->activeResponseVersion = '1.0';
         } else {
             $this->willCloseConnection = $forceClose || ($connHeader === 'close');
             $this->activeResponseVersion = '1.1';
         }
-
-        if (! $this->streamingRequests && $this->expectedBodyLength > $this->maxBodySize) {
-            throw new PayloadTooLargeException('Payload Too Large');
-        }
     }
 
-    /**
-     * Validates and parses a single Content-Length field value.
-     *
-     * RFC 9110 section 8.6 requires Content-Length to be an unsigned string of decimal
-     * digits so no leading "+"/"-" sign, no surrounding non-digit characters. A value
-     * that doesn't match this grammar is an unrecoverable framing error per RFC 9112
-     * section 6.3 and must never be silently coerced via a numeric cast: PHP's (int)
-     * cast on "10abc" yields 10 and on "-5" yields -5, either of which would desync
-     * this server's view of the body boundary from any front-end proxy in front of it.
-     *
-     * @throws MessageParsingException If the value isn't a valid unsigned decimal digit string.
-     */
-    private function parseContentLengthValue(string $value): int
+    private function compileResponseHeaders(Response $response, bool $isStreamingOut, bool &$isChunkedResponse, bool &$shouldClose): string
     {
-        $trimmed = trim($value);
+        $version = $response->getProtocolVersion() === '1.1' ? $this->activeResponseVersion : $response->getProtocolVersion();
+        $headers = $response->getHeaders();
+        $body = $response->getBody();
 
-        if ($trimmed === '' || ! ctype_digit($trimmed)) {
-            throw new MessageParsingException("Invalid Content-Length value: \"{$value}\"");
+        if (! isset($headers['server'])) {
+            $headers['server'] = ['Hibla/1.0'];
         }
 
-        return (int) $trimmed;
+        if ($isStreamingOut && ! isset($headers['content-length'])) {
+            $isChunkedResponse = true;
+            $headers['transfer-encoding'] = ['chunked'];
+        } elseif (! $isStreamingOut && ! isset($headers['content-length']) && $response->getStatusCode() !== 101) {
+            $headers['content-length'] = [(string) \strlen(\is_string($body) ? $body : '')];
+        }
+
+        $shouldClose = $this->willCloseConnection || strtolower($response->getHeaderLine('connection')) === 'close';
+
+        if ($shouldClose) {
+            $headers['connection'] = ['close'];
+        } elseif ($version === '1.0' && ! isset($headers['connection'])) {
+            $headers['connection'] = ['keep-alive'];
+        }
+
+        $lines = ["HTTP/{$version} {$response->getStatusCode()} {$response->getReasonPhrase()}"];
+
+        foreach ($headers as $name => $values) {
+            $displayName = self::formatHeaderNameForWire($name);
+            foreach ((array) $values as $value) {
+                $strValue = (string) $value;
+
+                // SECURITY BOUNDARY: Throw if the application outputs unsafe control characters.
+                // Prevents HTTP Response Splitting and Alerts the developer.
+                if (preg_match('/[\r\n\0]/', $strValue) === 1) {
+                    throw new InvalidResponseException(
+                        "Header value for '{$name}' contains invalid control characters (CR, LF, or NUL)"
+                    );
+                }
+
+                $lines[] = "{$displayName}: {$strValue}";
+            }
+        }
+
+        return implode("\r\n", $lines) . "\r\n\r\n";
+    }
+
+    private function writeStringResponse(string $headerBlock, string $body, bool $shouldClose, callable $triggerComplete): void
+    {
+        if ($shouldClose) {
+            $this->connection->end($headerBlock . $body);
+            $this->state = self::STATE_UPGRADED;
+        } else {
+            $this->connection->write($headerBlock . $body);
+            $this->handleKeepAliveState();
+        }
+
+        $triggerComplete();
+    }
+
+    private function writeStreamResponse(ReadableStreamInterface $body, string $headerBlock, bool $isChunkedResponse, bool $shouldClose, callable $triggerComplete): void
+    {
+        if (! $body->isReadable()) {
+            $finalPayload = $headerBlock;
+            if ($isChunkedResponse) {
+                $finalPayload .= "0\r\n\r\n";
+            }
+
+            if ($shouldClose) {
+                $this->connection->end($finalPayload);
+                $this->state = self::STATE_UPGRADED;
+            } else {
+                $this->connection->write($finalPayload);
+                $this->handleKeepAliveState();
+            }
+            $triggerComplete();
+
+            return;
+        }
+
+        $this->connection->write($headerBlock);
+
+        $connectionCloseListener = $body->close(...);
+        $this->connection->on('close', $connectionCloseListener);
+
+        $drainListener = $body->resume(...);
+        $this->connection->on('drain', $drainListener);
+
+        $body->on('data', function (string $chunk) use ($isChunkedResponse, $body) {
+            if ($isChunkedResponse) {
+                $canContinue = $this->connection->write(dechex(\strlen($chunk)) . "\r\n" . $chunk . "\r\n");
+            } else {
+                $canContinue = $this->connection->write($chunk);
+            }
+
+            if ($canContinue === false) {
+                $body->pause();
+            }
+        });
+
+        $body->on('end', function () use ($isChunkedResponse, $shouldClose, $connectionCloseListener, $drainListener, $triggerComplete) {
+            $this->connection->removeListener('close', $connectionCloseListener);
+            $this->connection->removeListener('drain', $drainListener);
+
+            $finalChunk = $isChunkedResponse ? "0\r\n\r\n" : '';
+
+            if ($shouldClose || $this->willCloseConnection) {
+                if ($finalChunk !== '') {
+                    $this->connection->end($finalChunk);
+                } else {
+                    $this->connection->end();
+                }
+                $this->state = self::STATE_UPGRADED;
+            } else {
+                if ($finalChunk !== '') {
+                    $this->connection->write($finalChunk);
+                }
+                $this->handleKeepAliveState();
+            }
+            $triggerComplete();
+        });
+
+        $body->on('error', function () use ($connectionCloseListener, $triggerComplete) {
+            $this->connection->removeListener('close', $connectionCloseListener);
+            $this->connection->close();
+            $triggerComplete();
+        });
+
+        $body->on('close', function () use ($connectionCloseListener, $triggerComplete) {
+            $this->connection->removeListener('close', $connectionCloseListener);
+            $triggerComplete();
+        });
+
+        $body->resume();
+    }
+
+    private function pushBodyData(string $data): bool
+    {
+        if ($this->currentRequest === null) {
+            return true;
+        }
+
+        if ($this->streamingRequests && $this->bodyStream !== null) {
+            $this->bodyStream->push($data);
+
+            return true;
+        }
+
+        $this->bufferedBodyBytes += \strlen($data);
+
+        if ($this->bufferedBodyBytes > $this->maxBodySize) {
+            $this->sendErrorAndClose(413, 'Payload Too Large');
+
+            return false;
+        }
+
+        $this->bodyChunks[] = $data;
+
+        return true;
+    }
+
+    private function finalizeRequest(): void
+    {
+        $request = $this->currentRequest;
+        if ($request === null) {
+            return;
+        }
+
+        if ($this->streamingRequests && $this->bodyStream !== null) {
+            $this->bodyStream->end();
+        } else {
+            $request->setBody(implode('', $this->bodyChunks));
+
+            $this->activeRequestsCount++;
+            if (\is_callable($this->onRequest)) {
+                ($this->onRequest)($request, $this);
+            }
+        }
+
+        if ($this->state !== self::STATE_UPGRADED) {
+            $this->state = self::STATE_HEADERS;
+        }
+
+        $this->currentRequest = null;
+        $this->bodyStream = null;
+        $this->bodyChunks = [];
+        $this->isChunked = false;
+        $this->expectedBodyLength = 0;
+        $this->bytesRead = 0;
+        $this->bufferedBodyBytes = 0;
     }
 
     private function sendErrorAndClose(int $statusCode, string $reason): void
@@ -1184,9 +1155,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->state = self::STATE_UPGRADED;
     }
 
-    /**
-     * Reclaims memory from the processed segment of the TCP buffer.
-     */
     private function compactBuffer(): void
     {
         if ($this->bufferOffset === 0) {
@@ -1200,27 +1168,19 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bufferOffset = 0;
     }
 
-    /**
-     * Converts internal lowercase headers (e.g., "content-type") to
-     * standard HTTP/1.1 Title-Case wire format (e.g., "Content-Type").
-     */
-    private static function formatHeaderNameForWire(string $name): string
+    private function handleConnectionCloseEvent(): void
     {
-        if (isset(self::$headerNameCache[$name])) {
-            return self::$headerNameCache[$name];
-        }
+        $this->connection->on('close', function () {
+            $this->cancelAllTimers();
 
-        if (\count(self::$headerNameCache) > self::MAX_HEADER_CACHE_SIZE) {
-            self::$headerNameCache = [];
-        }
+            if ($this->bodyStream !== null && $this->bodyStream->isReadable()) {
+                $this->bodyStream->close();
+            }
 
-        return self::$headerNameCache[$name] = str_replace(' ', '-', ucwords(str_replace('-', ' ', $name)));
+            $this->state = self::STATE_UPGRADED;
+        });
     }
 
-    /**
-     * Handles state transition after a response has been written.
-     * Starts the header timer if pipelined requests exist, otherwise starts the keep-alive timer.
-     */
     private function handleKeepAliveState(): void
     {
         if ($this->state === self::STATE_UPGRADED) {
@@ -1277,5 +1237,71 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     {
         $this->cancelHeaderTimer();
         $this->cancelKeepAliveTimer();
+    }
+
+    private static function isValidToken(string $token): bool
+    {
+        return $token !== '' && preg_match('/[^\x21-\x7E]|[()<>@,;:\\\\"\/\[\]?={}]/', $token) !== 1;
+    }
+
+    private static function isValidRequestTarget(string $target): bool
+    {
+        return $target !== '' && preg_match('/[\x00-\x1F\x7F]/', $target) !== 1;
+    }
+
+    private static function isValidHttpVersion(string $version): bool
+    {
+        return \strlen($version) === 8
+            && strncmp($version, 'HTTP/', 5) === 0
+            && $version[6] === '.'
+            && ctype_digit($version[5])
+            && ctype_digit($version[7]);
+    }
+
+    private static function isValidHeaderValue(string $value): bool
+    {
+        return preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $value) !== 1;
+    }
+
+    /**
+     * @param array<string, list<string>> $headers
+     */
+    private static function validateHostHeaderRequirement(array $headers, string $protocolVersion): void
+    {
+        if ($protocolVersion === '1.1') {
+            if (! isset($headers['host'])) {
+                throw new MessageParsingException('HTTP/1.1 requests MUST include a Host header field');
+            }
+            if (\count($headers['host']) > 1) {
+                throw new MessageParsingException('HTTP/1.1 requests MUST NOT contain more than one Host header field');
+            }
+            if (str_contains($headers['host'][0], ',')) {
+                throw new MessageParsingException('Host header field must not contain a comma-separated list');
+            }
+        }
+    }
+
+    private static function parseContentLengthValue(string $value): int
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '' || ! ctype_digit($trimmed)) {
+            throw new MessageParsingException("Invalid Content-Length value: \"{$value}\"");
+        }
+
+        return (int) $trimmed;
+    }
+
+    private static function formatHeaderNameForWire(string $name): string
+    {
+        if (isset(self::$headerNameCache[$name])) {
+            return self::$headerNameCache[$name];
+        }
+
+        if (\count(self::$headerNameCache) > self::MAX_HEADER_CACHE_SIZE) {
+            self::$headerNameCache = [];
+        }
+
+        return self::$headerNameCache[$name] = str_replace(' ', '-', ucwords(str_replace('-', ' ', $name)));
     }
 }
