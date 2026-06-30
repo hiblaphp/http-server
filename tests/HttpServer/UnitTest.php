@@ -198,4 +198,20 @@ describe('HttpServer Configuration & Instantiation', function () {
 
         expect(getServerProperty($server, 'workerRestartLimit'))->toBeNull();
     });
+
+    it('has a default maximum concurrent requests per connection of 128', function () {
+        $server = HttpServer::create();
+
+        expect(getServerProperty($server, 'maxConcurrentRequestsPerConnection'))->toBe(128);
+    });
+
+    it('can configure the maximum concurrent requests per connection', function () {
+        $server = HttpServer::create()->withMaxConcurrentRequestsPerConnection(256);
+
+        expect(getServerProperty($server, 'maxConcurrentRequestsPerConnection'))->toBe(256);
+    });
+
+    it('throws an exception if maximum concurrent requests per connection is less than 1', function () {
+        HttpServer::create()->withMaxConcurrentRequestsPerConnection(0);
+    })->throws(InvalidConfigurationException::class, 'Concurrent requests limit must be at least 1.');
 });

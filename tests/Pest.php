@@ -18,8 +18,12 @@ function getServerProperty(HttpServer $server, string $property): mixed
     return $reflection->getProperty($property)->getValue($server);
 }
 
-function mockConnection(string &$buffer, bool $expectClose = false): ConnectionInterface
-{
+function mockConnection(
+    string &$buffer,
+    ?callable &$onData = null,
+    ?int &$pauseCount = null,
+    ?int &$resumeCount = null
+): ConnectionInterface {
     $connection = Mockery::mock(ConnectionInterface::class);
     $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
     $connection->shouldReceive('write')->andReturnUsing(function (string $data) use (&$buffer) {
@@ -36,15 +40,30 @@ function mockConnection(string &$buffer, bool $expectClose = false): ConnectionI
 
     $closeListeners = [];
 
-    $connection->shouldReceive('on')->zeroOrMoreTimes()->andReturnUsing(function (string $event, callable $listener) use (&$closeListeners) {
+    $connection->shouldReceive('on')->zeroOrMoreTimes()->andReturnUsing(function (string $event, callable $listener) use (&$closeListeners, &$onData) {
         if ($event === 'close') {
             $closeListeners[] = $listener;
+        }
+        if ($event === 'data') {
+            $onData = $listener;
         }
     });
 
     $connection->shouldReceive('close')->zeroOrMoreTimes()->andReturnUsing(function () use (&$closeListeners) {
         foreach ($closeListeners as $listener) {
             $listener();
+        }
+    });
+
+    $connection->shouldReceive('pause')->zeroOrMoreTimes()->andReturnUsing(function () use (&$pauseCount) {
+        if ($pauseCount !== null) {
+            $pauseCount++;
+        }
+    });
+
+    $connection->shouldReceive('resume')->zeroOrMoreTimes()->andReturnUsing(function () use (&$resumeCount) {
+        if ($resumeCount !== null) {
+            $resumeCount++;
         }
     });
 
