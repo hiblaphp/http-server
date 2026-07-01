@@ -27,8 +27,8 @@ function runConfigTest(callable $configureServer, callable $clientActions): void
         try {
             $configureServer($address);
             exit(0);
-        } catch (\Throwable $e) {
-            fwrite(STDERR, "Child Error: " . $e->getMessage());
+        } catch (Throwable $e) {
+            fwrite(STDERR, 'Child Error: ' . $e->getMessage());
             exit(1);
         }
     }
@@ -63,11 +63,12 @@ function runClusterConfigTest(callable $configureServer, callable $clientActions
 
     if ($pid === 0) {
         posix_setpgid(0, 0);
+
         try {
             $configureServer($address);
             exit(0);
-        } catch (\Throwable $e) {
-            fwrite(STDERR, "Cluster Master Error: " . $e->getMessage());
+        } catch (Throwable $e) {
+            fwrite(STDERR, 'Cluster Master Error: ' . $e->getMessage());
             exit(1);
         }
     }
@@ -81,7 +82,7 @@ function runClusterConfigTest(callable $configureServer, callable $clientActions
     }
 }
 
-describe("True Integration Test", function () {
+describe('True Integration Test', function () {
     it('starts the server and gracefully drains in-flight requests on SIGTERM', function () {
         if (PHP_OS_FAMILY === 'Windows') {
             $this->markTestSkipped('Process forking and signal trapping are not supported on Windows.');
@@ -102,10 +103,11 @@ describe("True Integration Test", function () {
                         await(delay(0.1));
 
                         return Response::plaintext('Drained Safely');
-                    });
+                    })
+                ;
                 exit(0);
-            } catch (\Throwable $e) {
-                fwrite(STDERR, "Child Error: " . $e->getMessage());
+            } catch (Throwable $e) {
+                fwrite(STDERR, 'Child Error: ' . $e->getMessage());
                 exit(1);
             }
         }
@@ -122,24 +124,26 @@ describe("True Integration Test", function () {
             posix_kill($pid, SIGTERM);
 
             $response = '';
-            while (!feof($fp)) {
+            while (! feof($fp)) {
                 $response .= fread($fp, 1024);
             }
             fclose($fp);
 
             expect($response)->toContain('HTTP/1.1 200 OK')
-                ->and($response)->toContain('Drained Safely');
+                ->and($response)->toContain('Drained Safely')
+            ;
 
             pcntl_waitpid($pid, $status);
             expect(pcntl_wexitstatus($status))->toBe(0);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             posix_kill($pid, SIGKILL);
+
             throw $e;
         }
     });
 });
 
-describe("Clustered Integration Test", function () {
+describe('Clustered Integration Test', function () {
     it('starts the clustered server and gracefully drains in-flight requests on SIGTERM', function () {
         if (PHP_OS_FAMILY === 'Windows') {
             $this->markTestSkipped('Process forking and signal trapping are not supported on Windows.');
@@ -163,10 +167,11 @@ describe("Clustered Integration Test", function () {
                         await(delay(0.1));
 
                         return Response::plaintext('Drained Safely');
-                    });
+                    })
+                ;
                 exit(0);
-            } catch (\Throwable $e) {
-                fwrite(STDERR, "Master Cluster Error: " . $e->getMessage());
+            } catch (Throwable $e) {
+                fwrite(STDERR, 'Master Cluster Error: ' . $e->getMessage());
                 exit(1);
             }
         }
@@ -183,24 +188,26 @@ describe("Clustered Integration Test", function () {
             posix_kill(-$pid, SIGTERM);
 
             $response = '';
-            while (!feof($fp)) {
+            while (! feof($fp)) {
                 $response .= fread($fp, 1024);
             }
             fclose($fp);
 
             expect($response)->toContain('HTTP/1.1 200 OK')
-                ->and($response)->toContain('Drained Safely');
+                ->and($response)->toContain('Drained Safely')
+            ;
 
             pcntl_waitpid($pid, $status);
             expect(pcntl_wexitstatus($status))->toBe(0);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             posix_kill(-$pid, SIGKILL);
+
             throw $e;
         }
     });
 });
 
-describe("Server Configuration Integration Tests", function () {
+describe('Server Configuration Integration Tests', function () {
 
     it('enforces max body size limit', function () {
         runConfigTest(
@@ -208,7 +215,8 @@ describe("Server Configuration Integration Tests", function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withMaxBodySize(5)
-                    ->start(fn() => Response::plaintext('OK'));
+                    ->start(fn () => Response::plaintext('OK'))
+                ;
             },
             function ($fp) {
                 fwrite($fp, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n0123456789");
@@ -225,7 +233,8 @@ describe("Server Configuration Integration Tests", function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withHeaderLimits(8192, 2)
-                    ->start(fn() => Response::plaintext('OK'));
+                    ->start(fn () => Response::plaintext('OK'))
+                ;
             },
             function ($fp) {
                 fwrite($fp, "GET / HTTP/1.1\r\nHost: localhost\r\nX-One: 1\r\nX-Two: 2\r\n\r\n");
@@ -242,7 +251,8 @@ describe("Server Configuration Integration Tests", function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withHeaderTimeout(0.5)
-                    ->start(fn() => Response::plaintext('OK'));
+                    ->start(fn () => Response::plaintext('OK'))
+                ;
             },
             function ($fp) {
                 fwrite($fp, "GET / HTTP/1.1\r\nHost: localhost\r\n");
@@ -261,7 +271,8 @@ describe("Server Configuration Integration Tests", function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withKeepAliveTimeout(0.4)
-                    ->start(fn() => Response::plaintext('OK'));
+                    ->start(fn () => Response::plaintext('OK'))
+                ;
             },
             function ($fp) {
                 fwrite($fp, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
@@ -287,8 +298,9 @@ describe("Server Configuration Integration Tests", function () {
             function ($address) use ($lockFile) {
                 HttpServer::create($address)
                     ->withoutLogging()
-                    ->onStart(fn() => file_put_contents($lockFile, 'booted_successfully'))
-                    ->start(fn() => Response::plaintext('OK'));
+                    ->onStart(fn () => file_put_contents($lockFile, 'booted_successfully'))
+                    ->start(fn () => Response::plaintext('OK'))
+                ;
             },
             function ($fp) use ($lockFile) {
                 fwrite($fp, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
@@ -316,7 +328,8 @@ describe("Server Configuration Integration Tests", function () {
                         $isStream = $body instanceof ReadableStreamInterface;
 
                         return Response::plaintext($isStream ? 'STREAM_DETECTED' : 'STRING_DETECTED');
-                    });
+                    })
+                ;
             },
             function ($fp) {
                 fwrite($fp, "POST / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 4\r\n\r\nbody");
@@ -328,7 +341,7 @@ describe("Server Configuration Integration Tests", function () {
     });
 });
 
-describe("Clustered Mode Advanced Integration Tests", function () {
+describe('Clustered Mode Advanced Integration Tests', function () {
 
     it('automatically recovers and respawns workers when they crash', function () {
         runClusterConfigTest(
@@ -342,7 +355,8 @@ describe("Clustered Mode Advanced Integration Tests", function () {
                         }
 
                         return Response::plaintext('ALIVE_REPLACEMENT');
-                    });
+                    })
+                ;
             },
             function ($address) {
                 $fp = stream_socket_client("tcp://{$address}", $errno, $errstr, 1.0);
@@ -361,7 +375,8 @@ describe("Clustered Mode Advanced Integration Tests", function () {
                 fclose($fp2);
 
                 expect($response2)->toContain('200 OK')
-                    ->and($response2)->toContain('ALIVE_REPLACEMENT');
+                    ->and($response2)->toContain('ALIVE_REPLACEMENT')
+                ;
             }
         );
     });
@@ -377,11 +392,13 @@ describe("Clustered Mode Advanced Integration Tests", function () {
                     ->start(function (Request $request) {
                         if ($request->getUri() === '/bloat') {
                             $data = str_repeat('X', 30 * 1024 * 1024);
+
                             return Response::plaintext('Bloated to ' . strlen($data));
                         }
 
                         return Response::plaintext('STABLE');
-                    });
+                    })
+                ;
             },
             function ($address) {
                 $fp = stream_socket_client("tcp://{$address}", $errno, $errstr, 1.0);
@@ -401,7 +418,8 @@ describe("Clustered Mode Advanced Integration Tests", function () {
                 fclose($fp2);
 
                 expect($response2)->toContain('200 OK')
-                    ->and($response2)->toContain('STABLE');
+                    ->and($response2)->toContain('STABLE')
+                ;
             }
         );
     });
@@ -414,9 +432,10 @@ describe("Clustered Mode Advanced Integration Tests", function () {
             function ($address) use ($bootstrapFile) {
                 $options = ClusterOptions::make()
                     ->withClusterBootstrap($bootstrapFile, function (string $file) {
-                        require $file; 
+                        require $file;
                         define('BOOTSTRAP_CALLBACK_RAN', 'callback_yes');
-                    });
+                    })
+                ;
 
                 HttpServer::create($address)
                     ->withCluster(1, $options)
@@ -426,7 +445,8 @@ describe("Clustered Mode Advanced Integration Tests", function () {
                         $c = defined('BOOTSTRAP_CALLBACK_RAN') ? BOOTSTRAP_CALLBACK_RAN : 'callback_no';
 
                         return Response::plaintext("{$f}:{$c}");
-                    });
+                    })
+                ;
             },
             function ($address) use ($bootstrapFile) {
                 $fp = stream_socket_client("tcp://{$address}", $errno, $errstr, 1.0);
@@ -436,7 +456,8 @@ describe("Clustered Mode Advanced Integration Tests", function () {
                 fclose($fp);
 
                 expect($response)->toContain('200 OK')
-                    ->and($response)->toContain('file_yes:callback_yes');
+                    ->and($response)->toContain('file_yes:callback_yes')
+                ;
 
                 if (file_exists($bootstrapFile)) {
                     unlink($bootstrapFile);

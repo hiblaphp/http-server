@@ -536,12 +536,12 @@ final class HttpServer implements HttpServerInterface
             $this->log("\nGracefully shutting down cluster...");
 
             // Explicitly forward the shutdown signal to all child workers.
-            // This ensures graceful shutdown works perfectly in Docker 
+            // This ensures graceful shutdown works perfectly in Docker
             // and in your integration tests!
             foreach ($pool->getWorkerPids() as $workerPid) {
                 @posix_kill($workerPid, SIGTERM);
             }
-            
+
             $pool->drain();
             Loop::stop();
         }));
