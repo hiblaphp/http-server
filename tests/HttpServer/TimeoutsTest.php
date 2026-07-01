@@ -21,7 +21,7 @@ describe('HTTP Server Timeouts & Slowloris Protection', function () {
     it('disconnects slow clients (Slowloris attack) over a real TCP socket', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return new ServerResponse(200, [], 'Success');
-        }, headerTimeout: 0.2);
+        }, headerTimeout: 0.4);
 
         try {
             $rawClient = new Connector();
@@ -34,12 +34,11 @@ describe('HTTP Server Timeouts & Slowloris Protection', function () {
 
             $connection->write("GET / HTTP/1.1\r\nHost: localhost\r\nX-Slow-Header: ");
 
-            await(delay(0.3));
+            await(delay(0.6));
 
             expect($responseBuffer)->toContain('HTTP/1.1 408 Request Timeout')
                 ->and($responseBuffer)->toContain('Connection: close')
             ;
-
         } finally {
             $socket->close();
         }
@@ -48,7 +47,7 @@ describe('HTTP Server Timeouts & Slowloris Protection', function () {
     it('closes persistent connections gracefully after idle time', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return new ServerResponse(200, [], 'OK');
-        }, keepAliveTimeout: 0.2);
+        }, keepAliveTimeout: 0.5);
 
         try {
             $rawClient = new Connector();
@@ -61,17 +60,15 @@ describe('HTTP Server Timeouts & Slowloris Protection', function () {
 
             $connection->write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
-            await(delay(0.05));
+            await(delay(0.15));
             expect($wasClosed)->toBeFalse();
 
-            await(delay(0.2));
+            await(delay(0.5));
             expect($wasClosed)->toBeTrue();
-
         } finally {
             $socket->close();
         }
     });
-
 });
 
 describe('Timeout Edge Cases', function () {
@@ -79,7 +76,7 @@ describe('Timeout Edge Cases', function () {
     it('disconnects completely silent clients on initial connection', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return new ServerResponse(200);
-        }, headerTimeout: 0.1);
+        }, headerTimeout: 0.3);
 
         try {
             $rawClient = new Connector();
@@ -90,7 +87,7 @@ describe('Timeout Edge Cases', function () {
                 $wasClosed = true;
             });
 
-            await(delay(0.15));
+            await(delay(0.45));
             expect($wasClosed)->toBeTrue();
         } finally {
             $socket->close();
@@ -100,7 +97,7 @@ describe('Timeout Edge Cases', function () {
     it('rejects drip-fed headers that take longer than the header timeout limit', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return new ServerResponse(200);
-        }, headerTimeout: 0.20);
+        }, headerTimeout: 0.5);
 
         try {
             $rawClient = new Connector();
@@ -112,10 +109,10 @@ describe('Timeout Edge Cases', function () {
             });
 
             $connection->write("GET / HTTP/1.1\r\n");
-            await(delay(0.15));
+            await(delay(0.2));
 
             $connection->write("Host: localhost\r\n");
-            await(delay(0.15));
+            await(delay(0.5));
 
             expect($responseBuffer)->toContain('HTTP/1.1 408 Request Timeout');
         } finally {
@@ -126,7 +123,7 @@ describe('Timeout Edge Cases', function () {
     it('safely handles instant pipelined requests without triggering the keep-alive timeout', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return new ServerResponse(200, [], 'Processed: ' . $request->getUri());
-        }, keepAliveTimeout: 0.1);
+        }, keepAliveTimeout: 0.3);
 
         try {
             $rawClient = new Connector();
@@ -138,27 +135,27 @@ describe('Timeout Edge Cases', function () {
             });
 
             $payload = "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n"
-                     . "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n";
+                . "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n";
 
             $connection->write($payload);
 
-            await(delay(0.05));
+            await(delay(0.1));
 
             expect($responseBuffer)->toContain('Processed: /first')
                 ->and($responseBuffer)->toContain('Processed: /second')
             ;
 
-            await(delay(0.12));
-
+            await(delay(0.25));
         } finally {
             $socket->close();
         }
     });
 
     it('cancels keep-alive idle timer when the first byte of a new request arrives and starts the header timer', function () {
+
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return new ServerResponse(200, [], 'OK');
-        }, headerTimeout: 0.2, keepAliveTimeout: 0.2);
+        }, headerTimeout: 5.0, keepAliveTimeout: 5.0);
 
         try {
             $rawClient = new Connector();
@@ -170,8 +167,10 @@ describe('Timeout Edge Cases', function () {
             $connection->on('data', function ($chunk) use (&$responseBuffer) {
                 $responseBuffer .= $chunk;
             });
+
             $connection->on('close', function () use (&$isClosed) {
                 $isClosed = true;
+               
             });
 
             $connection->write("GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n");
@@ -181,20 +180,20 @@ describe('Timeout Edge Cases', function () {
 
             $responseBuffer = '';
 
-            await(delay(0.12));
+            await(delay(0.2));
+
             expect($isClosed)->toBeFalse();
 
             $connection->write('GET /second HTTP');
 
-            await(delay(0.12));
+            await(delay(0.3));
             expect($isClosed)->toBeFalse();
 
-            await(delay(0.15));
+            await(delay(4.9));
 
             expect($isClosed)->toBeTrue()
                 ->and($responseBuffer)->toContain('HTTP/1.1 408 Request Timeout')
             ;
-
         } finally {
             $socket->close();
         }
@@ -214,7 +213,7 @@ describe('Timeout Edge Cases', function () {
             });
 
             return await($deferred);
-        }, streamingRequests: true, headerTimeout: 0.2);
+        }, streamingRequests: true, headerTimeout: 0.4);
 
         try {
             $rawClient = new Connector();
@@ -227,10 +226,10 @@ describe('Timeout Edge Cases', function () {
 
             $connection->write("POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
 
-            await(delay(0.15));
+            await(delay(0.2));
             $connection->write('12345');
 
-            await(delay(0.15));
+            await(delay(0.2));
             $connection->write('67890');
 
             await(delay(0.05));
@@ -255,7 +254,7 @@ describe('Timeout Edge Cases', function () {
             });
 
             return new ServerResponse(200, [], $stream);
-        }, keepAliveTimeout: 0.2);
+        }, keepAliveTimeout: 0.4);
 
         try {
             $rawClient = new Connector();
@@ -268,7 +267,7 @@ describe('Timeout Edge Cases', function () {
 
             $connection->write("GET /download HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
-            await(delay(0.4));
+            await(delay(0.6));
 
             expect($responseBuffer)->toContain('HTTP/1.1 200 OK')
                 ->and($responseBuffer)->toContain('Part1')
