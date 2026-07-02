@@ -2,8 +2,17 @@
 
 declare(strict_types=1);
 
+use Hibla\EventLoop\Loop;
+use Hibla\HttpServer\Message\MultipartForm;
 use Hibla\HttpServer\Message\Request;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
+use Hibla\Stream\ThroughStream;
+
+use function Hibla\await;
+
+afterEach(function () {
+    Loop::reset();
+});
 
 it('correctly assigns and retrieves constructor values', function () {
     $request = new Request(
@@ -99,5 +108,65 @@ it('can accept a readable stream object as the body', function () {
 
     expect($request->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
         ->and($request->getBody())->toBe($dummyStream)
+    ;
+});
+
+it('parses multipart form data via getParsedBody', function () {
+    $boundary = 'boundary123';
+    $payload = "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"foo\"\r\n\r\n" .
+        "bar\r\n" .
+        "--{$boundary}--\r\n";
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $payload
+    );
+
+    $form = await($request->getParsedBody());
+
+    expect($form)->toBeInstanceOf(MultipartForm::class)
+        ->and($form->get('foo'))->toBe('bar')
+    ;
+});
+
+it('rejects getParsedBody if content-type header is not multipart or lacks boundary', function () {
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'application/json'],
+        '{}'
+    );
+
+    expect(fn () => await($request->getParsedBody()))
+        ->toThrow(\RuntimeException::class, 'Not a valid multipart/form-data request')
+    ;
+});
+
+it('closes the body stream and cancels nested operations when getParsedBody promise is cancelled', function () {
+    $boundary = 'boundary123';
+    $bodyStream = new ThroughStream();
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $bodyStream
+    );
+
+    $promise = $request->getParsedBody();
+
+    Loop::runOnce();
+
+    expect($bodyStream->isReadable())->toBeTrue();
+
+    $promise->cancel();
+
+    Loop::runOnce();
+
+    expect($promise->isCancelled())->toBeTrue()
+        ->and($bodyStream->isReadable())->toBeFalse()
     ;
 });
