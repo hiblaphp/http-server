@@ -11,7 +11,6 @@ afterEach(function () {
     Loop::reset();
 });
 
-
 it('parses standard form fields fed in a single chunk', function () {
     $boundary = 'boundary123';
     $parser = new MultipartParser($boundary);

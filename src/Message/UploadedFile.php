@@ -18,15 +18,15 @@ final class UploadedFile
     /**
      * @param string $tmpPath Server-side temporary path where the upload is buffered.
      * @param string $clientFilename Client-supplied original filename, with directory
-     *   path information stripped (RFC 7578 section 4.2 / RFC 2183 section 2.3). The remaining name
-     *   and extension are still attacker-controlled and unverified -- do not use
-     *   directly as a storage path or as a basis for trust decisions (e.g. assuming
-     *   a ".jpg" extension means the content is actually an image).
+     *                               path information stripped (RFC 7578 section 4.2 / RFC 2183 section 2.3). The remaining name
+     *                               and extension are still attacker-controlled and unverified -- do not use
+     *                               directly as a storage path or as a basis for trust decisions (e.g. assuming
+     *                               a ".jpg" extension means the content is actually an image).
      * @param string $clientMediaType Client-supplied MIME type from the part's
-     *   Content-Type header. This is an unverified assertion, not a detected type --
-     *   it is trivially spoofable and must not be relied on for security decisions.
-     *   Use content-based type detection (e.g. finfo / magic bytes) if the actual
-     *   file type matters.
+     *                                Content-Type header. This is an unverified assertion, not a detected type --
+     *                                it is trivially spoofable and must not be relied on for security decisions.
+     *                                Use content-based type detection (e.g. finfo / magic bytes) if the actual
+     *                                file type matters.
      * @param int $size Size in bytes as counted while streaming the upload to disk.
      */
     public function __construct(
@@ -34,7 +34,8 @@ final class UploadedFile
         public readonly string $clientFilename,
         public readonly string $clientMediaType,
         public readonly int $size
-    ) {}
+    ) {
+    }
 
     /**
      * Asynchronously moves the uploaded file using standard streams and pure promise events.

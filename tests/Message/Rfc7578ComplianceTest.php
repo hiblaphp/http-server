@@ -22,7 +22,6 @@ afterEach(function () {
     }
 });
 
-
 it('collects multiple files under one shared "name" parameter without [] per RFC 7578 section 4.3', function () {
     $boundary = 'boundary123';
 

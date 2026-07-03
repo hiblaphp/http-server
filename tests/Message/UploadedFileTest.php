@@ -22,7 +22,6 @@ afterEach(function () {
     }
 });
 
-
 it('exposes the constructor values as readonly properties', function () {
     $tmpPath = tempnam(sys_get_temp_dir(), 'hibla_uf_test_');
     file_put_contents($tmpPath, 'payload');
@@ -96,8 +95,9 @@ it('rejects a second moveTo() call with a clear exception', function () {
 
     await($file->moveTo($destination1));
 
-    expect(fn() => await($file->moveTo($destination2)))
-        ->toThrow(\RuntimeException::class, 'File has already been moved.');
+    expect(fn () => await($file->moveTo($destination2)))
+        ->toThrow(\RuntimeException::class, 'File has already been moved.')
+    ;
 
     expect(file_exists($destination2))->toBeFalse();
 
@@ -117,8 +117,9 @@ it('rejects moveTo() if the temporary source no longer exists', function () {
 
     $file = new UploadedFile($tmpPath, 'ghost.txt', 'text/plain', 0);
 
-    expect(fn() => await($file->moveTo($destination)))
-        ->toThrow(\RuntimeException::class, 'Temporary file no longer exists.');
+    expect(fn () => await($file->moveTo($destination)))
+        ->toThrow(\RuntimeException::class, 'Temporary file no longer exists.')
+    ;
 
     expect(file_exists($destination))->toBeFalse();
 });
@@ -131,7 +132,7 @@ it('cleans up a partial destination file when the destination write errors', fun
 
     $file = new UploadedFile($tmpPath, 'fail.txt', 'text/plain', 18);
 
-    set_error_handler(static fn() => true, E_WARNING);
+    set_error_handler(static fn () => true, E_WARNING);
 
     try {
         $promise = $file->moveTo($destination);
@@ -139,8 +140,9 @@ it('cleans up a partial destination file when the destination write errors', fun
         restore_error_handler();
     }
 
-    expect(fn() => await($promise))
-        ->toThrow(StreamException::class, 'Failed to open file for writing:');
+    expect(fn () => await($promise))
+        ->toThrow(StreamException::class, 'Failed to open file for writing:')
+    ;
 
     expect(file_exists($destination))->toBeFalse()
         ->and(file_exists($tmpPath))->toBeTrue()
