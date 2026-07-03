@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Message;
 
+use Hibla\HttpServer\Exceptions\MalformedMultipartException;
+use Hibla\HttpServer\Exceptions\MultipartException;
+use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -12,8 +15,10 @@ use Hibla\Stream\Stream;
 /**
  * Concrete implementation of an incoming HTTP Request Value Object.
  */
-final class Request extends AbstractMessage
+class Request extends AbstractMessage
 {
+    use DeletesFilesSafely;
+
     /**
      * @internal Inherited from the HTTP Server configuration
      */
@@ -77,7 +82,7 @@ final class Request extends AbstractMessage
         $contentType = $this->getHeaderLine('Content-Type');
 
         if (preg_match('/boundary=(?:"([^"]+)"|([^;,\s]+))/i', $contentType, $matches) !== 1) {
-            return Promise::rejected(new \RuntimeException('Not a valid multipart/form-data request'));
+            return Promise::rejected(new MalformedMultipartException('Not a valid multipart/form-data request'));
         }
 
         $boundary = $matches[1] !== '' ? $matches[1] : $matches[2];
@@ -124,20 +129,20 @@ final class Request extends AbstractMessage
                     });
 
                     $destination->on('error', function (mixed $e) use ($rej, $tmpPath) {
-                        @unlink($tmpPath);
-                        $rej($e instanceof \Throwable ? $e : new \RuntimeException('Write error'));
+                        self::deleteFileSafely($tmpPath);
+                        $rej($e instanceof \Throwable ? $e : new MalformedMultipartException('Write error'));
                     });
 
                     $fileStream->on('error', function (mixed $e) use ($rej, $destination, $tmpPath) {
                         $destination->close();
-                        @unlink($tmpPath);
-                        $rej($e instanceof \Throwable ? $e : new \RuntimeException('Stream error'));
+                        self::deleteFileSafely($tmpPath);
+                        $rej($e instanceof \Throwable ? $e : new MultipartException('Stream error'));
                     });
 
                     $onFileCancel(static function () use ($fileStream, $destination, $tmpPath) {
                         $fileStream->close();
                         $destination->close();
-                        @unlink($tmpPath);
+                        self::deleteFileSafely($tmpPath);
                     });
 
                     $fileStream->pipe($destination);

@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Message;
 
+use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
 use Hibla\Stream\Stream;
 
 final class UploadedFile
 {
+    use DeletesFilesSafely;
+
     private bool $moved = false;
 
     /**
@@ -66,19 +69,19 @@ final class UploadedFile
             $dest->on('finish', function () use ($resolve, $source) {
                 $source->close();
                 $this->moved = true;
-                $this->deleteFile($this->tmpPath);
+                self::deleteFileSafely($this->tmpPath);
                 $resolve(null);
             });
 
             $dest->on('error', function (\Throwable $e) use ($reject, $source, $destinationPath) {
                 $source->close();
-                $this->deleteFile($destinationPath);
+                self::deleteFileSafely($destinationPath);
                 $reject($e);
             });
 
             $source->on('error', function (\Throwable $e) use ($reject, $dest, $destinationPath) {
                 $dest->close();
-                $this->deleteFile($destinationPath);
+                self::deleteFileSafely($destinationPath);
                 $reject($e);
             });
 
@@ -95,20 +98,10 @@ final class UploadedFile
         });
     }
 
-    /**
-     * Safely deletes a file only if it exists, without relying on error suppression.
-     */
-    private function deleteFile(string $path): void
-    {
-        if (file_exists($path)) {
-            unlink($path);
-        }
-    }
-
     public function __destruct()
     {
         if (! $this->moved) {
-            $this->deleteFile($this->tmpPath);
+            self::deleteFileSafely($this->tmpPath);
         }
     }
 }

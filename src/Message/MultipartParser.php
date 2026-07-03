@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Hibla\HttpServer\Message;
 
 use Evenement\EventEmitter;
+use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
 use Hibla\Stream\Interfaces\WritableStreamInterface;
 use Hibla\Stream\ThroughStream;
 
@@ -155,7 +156,7 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
                 } else {
                     // Prevent memory exhaustion from malicious header blocks
                     if (\strlen($this->buffer) > $this->maxHeaderSize) {
-                        $this->emit('error', [new \RuntimeException('Multipart headers too large')]);
+                        $this->emit('error', [new MultipartPartTooLargeException('Multipart headers too large')]);
                         $this->close();
                     }
 
