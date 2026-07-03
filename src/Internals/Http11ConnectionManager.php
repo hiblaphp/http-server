@@ -147,7 +147,9 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
     private function flushQueue(): void
     {
-        if ($this->isFlushing || $this->pipelineQueue === [] || $this->protocolHandler === null) {
+        $protocolHandler = $this->protocolHandler;
+
+        if ($this->isFlushing || $this->pipelineQueue === [] || $protocolHandler === null) {
             return;
         }
 
@@ -157,7 +159,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         }
 
         $this->isFlushing = true;
-        $connection = $this->protocolHandler->getConnection();
+        $connection = $protocolHandler->getConnection();
 
         $onComplete = function () use ($connection): void {
             array_shift($this->pipelineQueue);
@@ -176,20 +178,20 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             }
             $onComplete();
         } else {
-            if ($head->response instanceof Response && ! $this->protocolHandler->isUpgraded()) {
+            if ($head->response instanceof Response && ! $protocolHandler->isUpgraded()) {
                 try {
-                    $this->protocolHandler->writeResponse($head->response, $onComplete);
+                    $protocolHandler->writeResponse($head->response, $onComplete);
                 } catch (\Throwable $e) {
                     try {
                         $errorResponse = Response::plaintext("500 Internal Server Error\n" . $e->getMessage(), 500);
-                        $this->protocolHandler->writeResponse($errorResponse, $onComplete);
+                        $protocolHandler->writeResponse($errorResponse, $onComplete);
                     } catch (\Throwable) {
                         $connection->close();
                         $onComplete();
                     }
                 }
             } else {
-                $this->protocolHandler->decrementActiveRequests();
+                $protocolHandler->decrementActiveRequests();
                 $onComplete();
             }
         }
