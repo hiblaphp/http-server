@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Message;
 
 use Hibla\EventLoop\Loop;
+use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
 use Hibla\HttpServer\Message\MultipartParser;
 
 afterEach(function () {
@@ -188,5 +189,35 @@ it('handles fields with empty values cleanly', function () {
 
     expect($parsedFields)->toHaveKey('empty_field')
         ->and($parsedFields['empty_field'])->toBe('')
+    ;
+});
+
+it('emits a MultipartPartTooLargeException if headers exceed the configured limit even when sent in a single chunk', function () {
+    $boundary = 'boundary123';
+    $parser = new MultipartParser($boundary, 100);
+
+    $errorTriggered = false;
+    $exceptionClass = '';
+    $errorMessage = '';
+
+    $parser->on('error', function (\Throwable $e) use (&$errorTriggered, &$exceptionClass, &$errorMessage) {
+        $errorTriggered = true;
+        $exceptionClass = \get_class($e);
+        $errorMessage = $e->getMessage();
+    });
+
+    $hugeName = str_repeat('A', 150);
+
+    $payload = "--boundary123\r\n" .
+        "Content-Disposition: form-data; name=\"{$hugeName}\"\r\n\r\n" .
+        "value\r\n" .
+        "--boundary123--\r\n";
+
+    $parser->write($payload);
+
+    expect($errorTriggered)->toBeTrue()
+        ->and($exceptionClass)->toBe(MultipartPartTooLargeException::class)
+        ->and($errorMessage)->toContain('headers too large')
+        ->and($parser->isWritable())->toBeFalse()
     ;
 });

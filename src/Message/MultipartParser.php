@@ -149,12 +149,21 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
                 $pos = strpos($this->buffer, "\r\n\r\n");
 
                 if ($pos !== false) {
+                    // Check if the headers that are about to parse exceed the limit
+                    if ($pos > $this->maxHeaderSize) {
+                        $this->emit('error', [new MultipartPartTooLargeException('Multipart headers too large')]);
+                        $this->close();
+
+                        return;
+                    }
+
                     $rawHeaders = substr($this->buffer, 0, $pos);
                     $this->buffer = substr($this->buffer, $pos + 4);
                     $this->processHeaders($rawHeaders);
                     $this->state = self::STATE_BODY;
                 } else {
                     // Prevent memory exhaustion from malicious header blocks
+                    // that drip in slowly and never send \r\n\r\n
                     if (\strlen($this->buffer) > $this->maxHeaderSize) {
                         $this->emit('error', [new MultipartPartTooLargeException('Multipart headers too large')]);
                         $this->close();

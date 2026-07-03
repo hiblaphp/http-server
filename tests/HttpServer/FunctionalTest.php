@@ -6,6 +6,8 @@ use Hibla\EventLoop\Loop;
 use Hibla\HttpClient\Http;
 use Hibla\HttpClient\SSE\SSEControl;
 use Hibla\HttpClient\SSE\SSEEvent as ClientSseEvent;
+use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
+use Hibla\HttpServer\Message\MultipartParser;
 use Hibla\HttpServer\Message\Request as ServerRequest;
 use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\HttpServer\Message\SseStream as ServerSseStream;
@@ -105,8 +107,7 @@ describe('Core HTTP Functionality', function () {
                         $resolveEvents(true);
                     }
                 })
-                ->connect()
-            ;
+                ->connect();
 
             $connection = await($promise);
             await($eventsCollected);
@@ -254,7 +255,7 @@ describe('Browser-Like Simulation', function () {
             expect($htmlResponse->status())->toBe(200);
 
             $assets = ['/style.css', '/app.js', '/logo.png'];
-            $promises = array_map(fn ($asset) => Http::get($url . $asset), $assets);
+            $promises = array_map(fn($asset) => Http::get($url . $asset), $assets);
 
             $responses = await(Promise::all($promises));
 
@@ -505,9 +506,9 @@ describe('Advanced Client-Server Interactions', function () {
 
             $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n");
 
-            Loop::addTimer(0.01, fn () => $connection->write('Slo'));
-            Loop::addTimer(0.02, fn () => $connection->write('w '));
-            Loop::addTimer(0.03, fn () => $connection->write('Client'));
+            Loop::addTimer(0.01, fn() => $connection->write('Slo'));
+            Loop::addTimer(0.02, fn() => $connection->write('w '));
+            Loop::addTimer(0.03, fn() => $connection->write('Client'));
 
             $responsePromise = new Promise(function ($resolve) use ($connection) {
                 $buffer = '';
@@ -598,6 +599,345 @@ describe('Advanced Client-Server Interactions', function () {
             ;
         } finally {
             @unlink($tmpFile);
+            $socket->close();
+        }
+    });
+
+    it('fully parses multipart form data into fields and temporary files via getParsedBody', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                $form = await($request->getParsedBody());
+
+                $username = $form->get('username');
+                $file = $form->getFile('avatar');
+
+                $fileContent = $file ? file_get_contents($file->tmpPath) : null;
+
+                return ServerResponse::json([
+                    'parsed_username' => $username,
+                    'parsed_filename' => $file ? $file->clientFilename : null,
+                    'file_content' => $fileContent,
+                ]);
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], $e->getMessage());
+            }
+        });
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'hibla_test_');
+        file_put_contents($tmpFile, 'actual_binary_data_123');
+
+        try {
+            $response = await(Http::client()
+                ->multipartWithFiles(
+                    data: ['username' => 'alice_smith'],
+                    files: ['avatar' => $tmpFile]
+                )
+                ->post($url . '/upload'));
+
+            expect($response->status())->toBe(200)
+                ->and($response->json('parsed_username'))->toBe('alice_smith')
+                ->and($response->json('parsed_filename'))->toBe(basename($tmpFile))
+                ->and($response->json('file_content'))->toBe('actual_binary_data_123')
+            ;
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+            $socket->close();
+        }
+    });
+
+    it('catches MultipartPartTooLargeException when a multipart boundary header exceeds maxHeaderSize', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                await($request->getParsedBody());
+
+                return ServerResponse::plaintext('Should have failed');
+            } catch (MultipartPartTooLargeException $e) {
+                return new ServerResponse(413, [], 'Part header too big');
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], 'Wrong error thrown');
+            }
+        }, maxHeaderSize: 1024);
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $boundary = 'boundary123';
+            $hugeName = str_repeat('A', 2048);
+
+            $payload = "--{$boundary}\r\n" .
+                "Content-Disposition: form-data; name=\"{$hugeName}\"\r\n\r\n" .
+                "value\r\n" .
+                "--{$boundary}--\r\n";
+
+            $headers = "POST / HTTP/1.1\r\n" .
+                "Host: localhost\r\n" .
+                "Content-Type: multipart/form-data; boundary={$boundary}\r\n" .
+                'Content-Length: ' . strlen($payload) . "\r\n\r\n";
+
+            $connection->write($headers . $payload);
+
+            $responsePromise = new Promise(function ($resolve) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
+                    $buffer .= $chunk;
+                    if (str_contains($buffer, 'Part header too big')) {
+                        $resolve($buffer);
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($responsePromise);
+
+            expect($rawResponse)->toContain('HTTP/1.1 413')
+                ->and($rawResponse)->toContain('Part header too big')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('supports uploading multiple files concurrently under a single parameter name (array and bracketless syntax)', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                $form = await($request->getParsedBody());
+                $files = $form->getFiles('documents');
+
+                $fileDetails = [];
+                foreach ($files as $file) {
+                    $fileDetails[] = [
+                        'name' => $file->clientFilename,
+                        'size' => $file->size,
+                        'content' => file_get_contents($file->tmpPath),
+                    ];
+                }
+
+                return ServerResponse::json(['files' => $fileDetails]);
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], $e->getMessage());
+            }
+        });
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $boundary = 'boundary123';
+            $payload = "--{$boundary}\r\n" .
+                "Content-Disposition: form-data; name=\"documents[]\"; filename=\"doc1.txt\"\r\n" .
+                "Content-Type: text/plain\r\n\r\n" .
+                "content_of_doc1\r\n" .
+                "--{$boundary}\r\n" .
+                "Content-Disposition: form-data; name=\"documents\"; filename=\"doc2.txt\"\r\n" .
+                "Content-Type: text/plain\r\n\r\n" .
+                "content_of_doc2\r\n" .
+                "--{$boundary}--\r\n";
+
+            $httpRequest = "POST /multi-upload HTTP/1.1\r\n" .
+                "Host: localhost\r\n" .
+                "Content-Type: multipart/form-data; boundary={$boundary}\r\n" .
+                'Content-Length: ' . strlen($payload) . "\r\n\r\n" .
+                $payload;
+
+            $connection->write($httpRequest);
+
+            $responsePromise = new Promise(function ($resolve, $reject) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $reject, $connection) {
+                    $buffer .= $chunk;
+
+                    if (str_contains($buffer, 'content_of_doc2')) {
+                        $resolve($buffer);
+                        $connection->close();
+                    } elseif (str_contains($buffer, 'HTTP/1.1 500') || str_contains($buffer, 'HTTP/1.1 400')) {
+                        $reject(new RuntimeException("Server failed with error response:\n" . $buffer));
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($responsePromise);
+
+            $jsonStart = strpos($rawResponse, "\r\n\r\n") + 4;
+            $json = json_decode(substr($rawResponse, $jsonStart), true);
+
+            expect($json['files'])->toHaveCount(2)
+                ->and($json['files'][0]['name'])->toBe('doc1.txt')
+                ->and($json['files'][0]['content'])->toBe('content_of_doc1')
+                ->and($json['files'][1]['name'])->toBe('doc2.txt')
+                ->and($json['files'][1]['content'])->toBe('content_of_doc2')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('successfully parses multipart body when the boundary parameter is enclosed in double quotes', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                $form = await($request->getParsedBody());
+
+                return ServerResponse::json(['value' => $form->get('test_field')]);
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], $e->getMessage());
+            }
+        });
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $boundary = 'simple-boundary';
+            $payload = "--{$boundary}\r\n" .
+                "Content-Disposition: form-data; name=\"test_field\"\r\n\r\n" .
+                "quoted_boundary_works\r\n" .
+                "--{$boundary}--\r\n";
+
+            $headers = "POST / HTTP/1.1\r\n" .
+                "Host: localhost\r\n" .
+                "Content-Type: multipart/form-data; boundary=\"{$boundary}\"\r\n" .
+                'Content-Length: ' . strlen($payload) . "\r\n\r\n";
+
+            $connection->write($headers . $payload);
+
+            $responsePromise = new Promise(function ($resolve, $reject) use ($connection) {
+                $buffer = '';
+                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $reject, $connection) {
+                    $buffer .= $chunk;
+                    if (str_contains($buffer, 'quoted_boundary_works')) {
+                        $resolve($buffer);
+                        $connection->close();
+                    } elseif (str_contains($buffer, 'HTTP/1.1 500')) {
+                        $reject(new RuntimeException('Server failed with 500 error'));
+                        $connection->close();
+                    }
+                });
+            });
+
+            $rawResponse = await($responsePromise);
+            expect($rawResponse)->toContain('quoted_boundary_works');
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('handles 0-byte empty file uploads cleanly alongside normal text fields', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                $form = await($request->getParsedBody());
+                $file = $form->getFile('empty_log');
+
+                return ServerResponse::json([
+                    'field' => $form->get('app_name'),
+                    'has_file' => $file !== null,
+                    'file_size' => $file ? $file->size : null,
+                ]);
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], $e->getMessage());
+            }
+        });
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'hibla_empty_');
+        file_put_contents($tmpFile, '');
+
+        try {
+            $response = await(Http::client()
+                ->multipartWithFiles(
+                    data: ['app_name' => 'HiblaServer'],
+                    files: ['empty_log' => $tmpFile]
+                )
+                ->post($url));
+
+            expect($response->status())->toBe(200)
+                ->and($response->json('field'))->toBe('HiblaServer')
+                ->and($response->json('has_file'))->toBeTrue()
+                ->and($response->json('file_size'))->toBe(0)
+            ;
+        } finally {
+            if (file_exists($tmpFile)) {
+                unlink($tmpFile);
+            }
+            $socket->close();
+        }
+    });
+
+    it('streams uploaded files directly to an external service (S3 simulation) in-memory with zero local disk IO', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $contentType = $request->getHeaderLine('Content-Type');
+
+            if (preg_match('/boundary=(?:"([^"]+)"|([^;,\s]+))/i', $contentType, $matches) !== 1) {
+                return new ServerResponse(400, [], 'Missing boundary');
+            }
+
+            $boundary = $matches[1] !== '' ? $matches[1] : $matches[2];
+
+            $parser = new MultipartParser($boundary);
+
+            $s3UploadedData = '';
+            $s3UploadedFilename = '';
+
+            $s3UploadPromise = new Promise(function ($resolve, $reject) use ($parser, &$s3UploadedData, &$s3UploadedFilename) {
+                $parser->on('file', function ($name, $filename, $mime, $fileStream) use (&$s3UploadedData, &$s3UploadedFilename, $reject) {
+                    $s3UploadedFilename = $filename;
+                    $fileStream->on('data', function (string $chunk) use (&$s3UploadedData) {
+                        $s3UploadedData .= $chunk;
+                    });
+
+                    $fileStream->on('error', function (Throwable $e) use ($reject) {
+                        $reject($e);
+                    });
+                });
+
+                $parser->on('end', function () use ($resolve) {
+                    $resolve(null);
+                });
+
+                $parser->on('error', function (Throwable $e) use ($reject) {
+                    $reject($e);
+                });
+            });
+
+            $request->getBody()->pipe($parser);
+
+            try {
+                await($s3UploadPromise);
+
+                return ServerResponse::json([
+                    'success' => true,
+                    'target' => 's3://my-bucket/' . $s3UploadedFilename,
+                    'bytes_received' => strlen($s3UploadedData),
+                    'content_preview' => $s3UploadedData,
+                ]);
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], $e->getMessage());
+            }
+        }, streamingRequests: true);
+
+        $localClientFile = tempnam(sys_get_temp_dir(), 'client_side_');
+        $filePayload = 'S3-Direct-Streaming-Multipart-Payload-Data-Check-123';
+        file_put_contents($localClientFile, $filePayload);
+
+        try {
+            $response = await(Http::client()
+                ->multipartWithFiles(
+                    data: ['album' => 'vacation_2026'],
+                    files: ['photo' => $localClientFile]
+                )
+                ->post($url . '/upload-to-s3'));
+
+            expect($response->status())->toBe(200)
+                ->and($response->json('success'))->toBeTrue()
+                ->and($response->json('target'))->toBe('s3://my-bucket/' . basename($localClientFile))
+                ->and($response->json('bytes_received'))->toBe(strlen($filePayload))
+                ->and($response->json('content_preview'))->toBe($filePayload)
+            ;
+        } finally {
+            if (file_exists($localClientFile)) {
+                unlink($localClientFile);
+            }
             $socket->close();
         }
     });
