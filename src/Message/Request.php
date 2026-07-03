@@ -15,6 +15,11 @@ use Hibla\Stream\Stream;
 final class Request extends AbstractMessage
 {
     /**
+     * @internal Inherited from the HTTP Server configuration
+     */
+    public int $maxHeaderSize = 16384;
+
+    /**
      * @param string $method
      * @param string $uri
      * @param array<string, string|list<string>> $headers
@@ -79,7 +84,7 @@ final class Request extends AbstractMessage
 
         /** @var Promise<MultipartForm> */
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary) {
-            $parser = new MultipartParser($boundary);
+            $parser = new MultipartParser($boundary, $this->maxHeaderSize);
             $form = new MultipartForm();
 
             /** @var array<int, PromiseInterface<null>> $writePromises */

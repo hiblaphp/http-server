@@ -51,7 +51,7 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
      */
     private bool $currentValid = false;
 
-    public function __construct(string $boundary)
+    public function __construct(string $boundary, private readonly int $maxHeaderSize = 16384)
     {
         $this->boundary = $boundary;
     }
@@ -154,7 +154,7 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
                     $this->state = self::STATE_BODY;
                 } else {
                     // Prevent memory exhaustion from malicious header blocks
-                    if (\strlen($this->buffer) > 8192) {
+                    if (\strlen($this->buffer) > $this->maxHeaderSize) {
                         $this->emit('error', [new \RuntimeException('Multipart headers too large')]);
                         $this->close();
                     }

@@ -50,8 +50,18 @@ final class UploadedFile
 
         /** @var Promise<void> */
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($destinationPath) {
-            $source = Stream::readableFile($this->tmpPath);
-            $dest = Stream::writableFile($destinationPath);
+            try {
+                $source = Stream::readableFile($this->tmpPath);
+                $dest = Stream::writableFile($destinationPath);
+            } catch (\Throwable $e) {
+                if (isset($source)) {
+                    $source->close();
+                }
+
+                $reject($e);
+
+                return;
+            }
 
             $dest->on('finish', function () use ($resolve, $source) {
                 $source->close();
