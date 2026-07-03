@@ -189,3 +189,22 @@ function createTestServer(
 
     return [$socket, $url];
 }
+
+function createMultipartPayload(string $boundary, array $fields, array $files): string
+{
+    $body = '';
+    foreach ($fields as $name => $value) {
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"{$name}\"\r\n\r\n";
+        $body .= "{$value}\r\n";
+    }
+    foreach ($files as $name => $file) {
+        $body .= "--{$boundary}\r\n";
+        $body .= "Content-Disposition: form-data; name=\"{$name}\"; filename=\"{$file['filename']}\"\r\n";
+        $body .= "Content-Type: {$file['mime']}\r\n\r\n";
+        $body .= "{$file['content']}\r\n";
+    }
+    $body .= "--{$boundary}--\r\n";
+
+    return $body;
+}

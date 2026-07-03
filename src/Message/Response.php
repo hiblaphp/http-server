@@ -11,7 +11,7 @@ use Hibla\Stream\Interfaces\ReadableStreamInterface;
 /**
  * Concrete implementation of an outgoing HTTP Response DTO.
  */
-final class Response extends AbstractMessage
+class Response extends AbstractMessage
 {
     /**
      * @var array<int, string> Map of standard HTTP status codes to reason phrases.

@@ -765,6 +765,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $serverParams = ['REMOTE_ADDR' => $this->connection->getRemoteAddress()];
         $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
 
+        $this->currentRequest->maxHeaderSize = $this->maxHeaderSize;
+
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
 
         if (! $this->streamingRequests && $this->expectedBodyLength > $this->maxBodySize) {
