@@ -42,11 +42,23 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
 
     private ?ThroughStream $currentFileStream = null;
 
+    /**
+     * Whether the current part has Content-Disposition: form-data, per
+     * RFC 7578 section 4.2 ("Each part MUST contain a Content-Disposition header
+     * field where the disposition type is 'form-data'."). Parts that fail
+     * this check are parsed structurally (so boundary tracking stays
+     * correct) but are never emitted as fields or files.
+     */
+    private bool $currentValid = false;
+
     public function __construct(string $boundary)
     {
         $this->boundary = $boundary;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public function write(string $data): bool
     {
         if (! $this->writable) {
@@ -57,6 +69,40 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
         $this->parseBuffer();
 
         return true;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function end(?string $data = null): void
+    {
+        if ($data !== null && $data !== '') {
+            $this->write($data);
+        }
+
+        $this->writable = false;
+
+        if ($this->currentFileStream !== null) {
+            $this->currentFileStream->end();
+        }
+
+        $this->emit('close');
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function isWritable(): bool
+    {
+        return $this->writable;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function close(): void
+    {
+        $this->writable = false;
     }
 
     private function parseBuffer(): void
@@ -153,14 +199,37 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
 
     private function processHeaders(string $rawHeaders): void
     {
-        if (preg_match('/name="([^"]+)"/i', $rawHeaders, $m) === 1) {
+        // RFC 7578 section 4.2: disposition type MUST be "form-data". Anything else
+        // (e.g. "attachment") is not valid multipart/form-data content and
+        // MUST NOT be admitted as a field or file.
+        $this->currentValid = false;
+
+        if (preg_match('/Content-Disposition:\s*([^;\r\n]+)/i', $rawHeaders, $m) === 1) {
+            if (strtolower(trim($m[1])) === 'form-data') {
+                $this->currentValid = true;
+            }
+        }
+
+        if (preg_match('/name="([^"]*)"/i', $rawHeaders, $m) === 1) {
             $this->currentName = $m[1];
         }
-        if (preg_match('/filename="([^"]+)"/i', $rawHeaders, $m) === 1) {
-            $this->currentFilename = $m[1];
+        if (preg_match('/filename="([^"]*)"/i', $rawHeaders, $m) === 1) {
+            $this->currentFilename = $this->sanitizeFilename($m[1]);
         }
         if (preg_match('/Content-Type:\s*([^\r\n]+)/i', $rawHeaders, $m) === 1) {
             $this->currentMime = trim($m[1]);
+        }
+
+        // RFC 7578 section 4.4: "Each part MAY have an (optional) 'Content-Type'
+        // header field, which defaults to 'text/plain'." A part with no
+        // explicit Content-Type must still be admitted with this default,
+        // not dropped by downstream consumers expecting a non-null mime.
+        if ($this->currentMime === null) {
+            $this->currentMime = 'text/plain';
+        }
+
+        if (! $this->currentValid) {
+            return;
         }
 
         if ($this->currentFilename !== null) {
@@ -171,8 +240,26 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
         }
     }
 
+    /**
+     * Reduces a client-supplied filename to a bare leaf name, per RFC 7578
+     * section 4.2 (citing RFC 2183 section 2.3): "do not use the file name blindly... and
+     * do not use directory path information that may be present." Handles
+     * both POSIX ("../../etc/evil.txt", "/etc/passwd") and Windows-style
+     * ("C:\\evil.txt") separators, since the client's platform is unknown.
+     */
+    private function sanitizeFilename(string $filename): string
+    {
+        $normalized = str_replace('\\', '/', $filename);
+
+        return basename($normalized);
+    }
+
     private function emitChunk(string $chunk): void
     {
+        if (! $this->currentValid) {
+            return;
+        }
+
         if ($this->currentFileStream !== null) {
             $this->currentFileStream->write($chunk);
         } elseif ($this->currentFieldBuffer !== null) {
@@ -182,41 +269,20 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
 
     private function finishCurrentPart(): void
     {
-        if ($this->currentFileStream !== null) {
-            $this->currentFileStream->end();
-            $this->currentFileStream = null;
-        } elseif ($this->currentFieldBuffer !== null) {
-            $this->emit('field', [$this->currentName, $this->currentFieldBuffer]);
-            $this->currentFieldBuffer = null;
+        if ($this->currentValid) {
+            if ($this->currentFileStream !== null) {
+                $this->currentFileStream->end();
+                $this->currentFileStream = null;
+            } elseif ($this->currentFieldBuffer !== null) {
+                $this->emit('field', [$this->currentName, $this->currentFieldBuffer]);
+                $this->currentFieldBuffer = null;
+            }
         }
 
         $this->currentName = null;
         $this->currentFilename = null;
         $this->currentMime = null;
-    }
-
-    public function end(?string $data = null): void
-    {
-        if ($data !== null && $data !== '') {
-            $this->write($data);
-        }
-
-        $this->writable = false;
-
-        if ($this->currentFileStream !== null) {
-            $this->currentFileStream->end();
-        }
-
-        $this->emit('close');
-    }
-
-    public function isWritable(): bool
-    {
-        return $this->writable;
-    }
-
-    public function close(): void
-    {
-        $this->writable = false;
+        $this->currentFieldBuffer = null;
+        $this->currentValid = false;
     }
 }

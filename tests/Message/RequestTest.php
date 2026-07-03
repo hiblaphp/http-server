@@ -141,7 +141,7 @@ it('rejects getParsedBody if content-type header is not multipart or lacks bound
     );
 
     expect(fn () => await($request->getParsedBody()))
-        ->toThrow(\RuntimeException::class, 'Not a valid multipart/form-data request')
+        ->toThrow(RuntimeException::class, 'Not a valid multipart/form-data request')
     ;
 });
 

@@ -142,7 +142,7 @@ describe('MultipartParser & Message Integration', function () {
 
         $form = await($request->getParsedBody());
 
-        $files = $form->getFile('documents');
+        $files = $form->getFiles('documents');
 
         expect($files)->toBeArray()->toHaveCount(2)
             ->and($files[0])->toBeInstanceOf(UploadedFile::class)
