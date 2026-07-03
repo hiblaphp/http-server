@@ -7,7 +7,7 @@ namespace Hibla\HttpServer\Message;
 final class MultipartForm
 {
     /**
-     * RFC 7578 §5.2: "Form parts with identical field names MUST NOT be
+     * RFC 7578 section 5.2: "Form parts with identical field names MUST NOT be
      * coalesced." Every submitted value is retained, in submission order.
      *
      * @var array<string, list<string>>
@@ -15,7 +15,7 @@ final class MultipartForm
     private array $fields = [];
 
     /**
-     * RFC 7578 §4.3: multiple files for one form field MUST be sent as
+     * RFC 7578 section 4.3: multiple files for one form field MUST be sent as
      * separate parts sharing the same "name" parameter (no "[]" required).
      * Stored uniformly as a list per name so single- and multi-file fields
      * share the same code path.
@@ -40,6 +40,15 @@ final class MultipartForm
 
     /**
      * Returns the first value submitted for this field, or null if absent.
+     *
+     * Values are returned as raw, undecoded bytes exactly as received on
+     * the wire. This library does not interpret RFC 7578 section 4.5/section 4.6 charset
+     * hints (the per-part "charset" Content-Type parameter or a "_charset_"
+     * field) -- no mainstream browser or server implementation does, since
+     * modern browsers submit forms as UTF-8 regardless of page encoding.
+     * If a caller expects a non-UTF-8 charset, decode explicitly, e.g.:
+     *
+     * mb_convert_encoding($form->get('field1'), 'UTF-8', 'ISO-8859-1');
      */
     public function get(string $name): ?string
     {
@@ -49,6 +58,9 @@ final class MultipartForm
     /**
      * Returns every value submitted for this field, in order. Empty array
      * if the field was not submitted.
+     *
+     * Same raw-bytes contract as get() -- see that method's docblock for
+     * charset handling notes.
      *
      * @return list<string>
      */
