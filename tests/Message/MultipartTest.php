@@ -8,6 +8,7 @@ use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Message\MultipartForm;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\UploadedFile;
+use Hibla\Promise\Promise;
 use Hibla\Stream\ThroughStream;
 
 use function Hibla\await;
@@ -269,5 +270,112 @@ describe('Multipart Advanced Cancellation Testing', function () {
         if (file_exists($tmpPath)) {
             unlink($tmpPath);
         }
+    });
+});
+
+describe('Multipart Stream-Only Parsing (streamMultipart)', function () {
+
+   it('streams multipart payloads on-the-fly and invokes callbacks with zero disk I/O', function () {
+        $boundary = 'boundary123';
+        $payload = "--{$boundary}\r\n" .
+            "Content-Disposition: form-data; name=\"username\"\r\n\r\n" .
+            "john_doe\r\n" .
+            "--{$boundary}\r\n" .
+            "Content-Disposition: form-data; name=\"email\"\r\n\r\n" .
+            "john@example.com\r\n" .
+            "--{$boundary}\r\n" .
+            "Content-Disposition: form-data; name=\"avatar\"; filename=\"avatar.png\"\r\n" .
+            "Content-Type: image/png\r\n\r\n" .
+            "binary_data_123\r\n" .
+            "--{$boundary}--\r\n";
+
+        $request = new Request(
+            'POST',
+            '/',
+            ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+            $payload
+        );
+
+        $fields = [];
+        $files = [];
+
+        await($request->streamMultipart(
+            onFile: function (string $name, string $filename, string $mime, $fileStream) use (&$files): void {
+                $contentPromise = new Promise(function ($resolve, $reject) use ($fileStream) {
+                    $buffer = '';
+                    $fileStream->on('data', function (string $chunk) use (&$buffer) {
+                        $buffer .= $chunk;
+                    });
+                    $fileStream->on('end', function () use (&$buffer, $resolve) {
+                        $resolve($buffer);
+                    });
+                    $fileStream->on('error', $reject);
+                });
+
+                $files[] = [
+                    'name' => $name,
+                    'filename' => $filename,
+                    'mime' => $mime,
+                    'content' => await($contentPromise),
+                ];
+            },
+            onField: function (string $name, string $value) use (&$fields): void {
+                $fields[$name] = $value;
+            }
+        ));
+
+        expect($fields)->toBe([
+            'username' => 'john_doe',
+            'email' => 'john@example.com'
+        ]);
+
+        expect($files)->toHaveCount(1)
+            ->and($files[0]['name'])->toBe('avatar')
+            ->and($files[0]['filename'])->toBe('avatar.png')
+            ->and($files[0]['mime'])->toBe('image/png')
+            ->and($files[0]['content'])->toBe('binary_data_123');
+    });
+
+    it('aborts parsing and closes all active, nested streams when the streamMultipart promise is cancelled mid-progress', function () {
+        $boundary = 'boundary123';
+        $bodyStream = new ThroughStream();
+
+        $request = new Request(
+            'POST',
+            '/',
+            ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+            $bodyStream
+        );
+
+        $fileEmitted = false;
+        /** @var \Hibla\Stream\Interfaces\ReadableStreamInterface|null $nestedFileStream */
+        $nestedFileStream = null;
+
+        $promise = $request->streamMultipart(
+            onFile: function (string $name, string $filename, string $mime, $fileStream) use (&$fileEmitted, &$nestedFileStream): void {
+                $fileEmitted = true;
+                $nestedFileStream = $fileStream;
+            }
+        );
+
+        $bodyStream->write("--{$boundary}\r\n" .
+            "Content-Disposition: form-data; name=\"avatar\"; filename=\"big_file.bin\"\r\n" .
+            "Content-Type: application/octet-stream\r\n\r\n" .
+            "partial_bytes_");
+
+        Loop::runOnce();
+
+        expect($fileEmitted)->toBeTrue()
+            ->and($nestedFileStream)->not->toBeNull()
+            ->and($nestedFileStream->isReadable())->toBeTrue()
+            ->and($bodyStream->isReadable())->toBeTrue();
+
+        $promise->cancel();
+
+        Loop::runOnce();
+
+        expect($promise->isCancelled())->toBeTrue()
+            ->and($bodyStream->isReadable())->toBeFalse() 
+            ->and($nestedFileStream->isReadable())->toBeFalse();
     });
 });

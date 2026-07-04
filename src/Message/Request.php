@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Message;
 
+use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\MalformedMultipartException;
 use Hibla\HttpServer\Exceptions\MultipartException;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
@@ -198,15 +199,109 @@ class Request extends AbstractMessage
                 return $allPromise;
             })->then(static function () use ($resolve, $form) {
                 $resolve($form);
-            })->catch(static function (\Throwable $error) use ($reject) {
-                $reject($error);
-            });
+            })->catch($reject(...));
 
             if ($isStream && $body instanceof ReadableStreamInterface) {
                 $body->pipe($parser);
             } elseif (\is_string($body)) {
                 $parser->write($body);
                 $parser->end();
+            }
+        });
+    }
+
+    /**
+     * Streams the multipart request body on-the-fly, invoking callbacks for each field and file part.
+     * Prevents any local disk I/O, allowing developers to stream file uploads directly to S3/Object Storage.
+     *
+     * @param callable(string $name, string $filename, string $mime, ReadableStreamInterface $fileStream): void $onFile
+     * @param (callable(string $name, string $value): void)|null $onField
+     *
+     * @return PromiseInterface<void>
+     */
+    public function streamMultipart(callable $onFile, ?callable $onField = null): PromiseInterface
+    {
+        $contentType = $this->getHeaderLine('Content-Type');
+
+        if (preg_match('/boundary=(?:"([^"]+)"|([^;,\s]+))/i', $contentType, $matches) !== 1) {
+            return Promise::rejected(new MalformedMultipartException('Not a valid multipart/form-data request'));
+        }
+
+        $boundary = $matches[1] !== '' ? $matches[1] : $matches[2];
+        $body = $this->getBody();
+
+        /** @var Promise<void> */
+        return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
+            $parser = new MultipartParser($boundary);
+
+            $pendingFibers = 0;
+            $parserEnded = false;
+
+            $parser->on('file', function (string $name, string $filename, string $mime, $fileStream) use ($onFile, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
+                $pendingFibers++;
+
+                $fiber = new \Fiber(function () use ($onFile, $name, $filename, $mime, $fileStream, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
+                    try {
+                        $onFile($name, $filename, $mime, $fileStream);
+                    } catch (\Throwable $e) {
+                        $reject($e);
+                    } finally {
+                        $pendingFibers--;
+                        if ($pendingFibers === 0 && $parserEnded) {
+                            $resolve(null);
+                        }
+                    }
+                });
+
+                Loop::addFiber($fiber);
+            });
+
+            if ($onField !== null) {
+                $parser->on('field', function (string $name, string $value) use ($onField, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
+                    $pendingFibers++;
+
+                    $fiber = new \Fiber(function () use ($onField, $name, $value, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
+                        try {
+                            $onField($name, $value);
+                        } catch (\Throwable $e) {
+                            $reject($e);
+                        } finally {
+                            $pendingFibers--;
+                            if ($pendingFibers === 0 && $parserEnded) {
+                                $resolve(null);
+                            }
+                        }
+                    });
+
+                    Loop::addFiber($fiber);
+                });
+            }
+
+            $parser->on('end', function () use (&$pendingFibers, &$parserEnded, $resolve): void {
+                $parserEnded = true;
+                if ($pendingFibers === 0) {
+                    $resolve(null);
+                }
+            });
+
+            $parser->on('error', $reject(...));
+
+            if ($body instanceof ReadableStreamInterface) {
+                $body->on('error', $reject(...));
+
+                $onCancel(static function () use ($body, $parser): void {
+                    $body->close();
+                    $parser->close();
+                });
+
+                $body->pipe($parser);
+            } else {
+                try {
+                    $parser->write($body);
+                    $parser->end();
+                } catch (\Throwable $e) {
+                    $reject($e);
+                }
             }
         });
     }

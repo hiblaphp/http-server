@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Hibla\EventLoop\Loop;
+use Hibla\HttpServer\Exceptions\MalformedMultipartException;
 use Hibla\HttpServer\Message\MultipartForm;
 use Hibla\HttpServer\Message\Request;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -140,9 +141,8 @@ it('rejects getParsedBody if content-type header is not multipart or lacks bound
         '{}'
     );
 
-    expect(fn () => await($request->getParsedBody()))
-        ->toThrow(RuntimeException::class, 'Not a valid multipart/form-data request')
-    ;
+    expect(fn() => await($request->getParsedBody()))
+        ->toThrow(RuntimeException::class, 'Not a valid multipart/form-data request');
 });
 
 it('closes the body stream and cancels nested operations when getParsedBody promise is cancelled', function () {
@@ -169,4 +169,115 @@ it('closes the body stream and cancels nested operations when getParsedBody prom
     expect($promise->isCancelled())->toBeTrue()
         ->and($bodyStream->isReadable())->toBeFalse()
     ;
+});
+
+
+
+it('streams multipart form-data on-the-fly and invokes callbacks correctly', function () {
+    $boundary = 'boundary123';
+    $payload = "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"field1\"\r\n\r\n" .
+        "value1\r\n" .
+        "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"file1\"; filename=\"test.txt\"\r\n" .
+        "Content-Type: text/plain\r\n\r\n" .
+        "file_content_123\r\n" .
+        "--{$boundary}--\r\n";
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $payload
+    );
+
+    $fields = [];
+    $files = [];
+
+    await($request->streamMultipart(
+        onFile: function (string $name, string $filename, string $mime, $fileStream) use (&$files): void {
+            $contentPromise = new \Hibla\Promise\Promise(function ($resolve, $reject) use ($fileStream) {
+                $buffer = '';
+                $fileStream->on('data', function (string $chunk) use (&$buffer) {
+                    $buffer .= $chunk;
+                });
+                $fileStream->on('end', function () use (&$buffer, $resolve) {
+                    $resolve($buffer);
+                });
+                $fileStream->on('error', $reject);
+            });
+
+            $files[] = [
+                'name' => $name,
+                'filename' => $filename,
+                'mime' => $mime,
+                'content' => await($contentPromise),
+            ];
+        },
+        onField: function (string $name, string $value) use (&$fields): void {
+            $fields[$name] = $value;
+        }
+    ));
+
+    expect($fields)->toBe(['field1' => 'value1'])
+        ->and($files)->toHaveCount(1)
+        ->and($files[0]['name'])->toBe('file1')
+        ->and($files[0]['filename'])->toBe('test.txt')
+        ->and($files[0]['mime'])->toBe('text/plain')
+        ->and($files[0]['content'])->toBe('file_content_123');
+});
+
+it('rejects streamMultipart with MalformedMultipartException if Content-Type lacks a boundary', function () {
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data'],
+        ''
+    );
+
+    expect(fn() => await($request->streamMultipart(fn() => null)))
+        ->toThrow(MalformedMultipartException::class, 'Not a valid multipart/form-data request');
+});
+
+it('closes the parent request body stream and cancels all nested operations when streamMultipart promise is cancelled', function () {
+    $boundary = 'boundary123';
+    $bodyStream = new ThroughStream();
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $bodyStream
+    );
+
+    $fileEmitted = false;
+    /** @var ReadableStreamInterface|null $nestedFileStream */
+    $nestedFileStream = null;
+
+    $promise = $request->streamMultipart(
+        onFile: function (string $name, string $filename, string $mime, $fileStream) use (&$fileEmitted, &$nestedFileStream): void {
+            $fileEmitted = true;
+            $nestedFileStream = $fileStream;
+        }
+    );
+
+    $bodyStream->write("--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"avatar\"; filename=\"photo.png\"\r\n" .
+        "Content-Type: image/png\r\n\r\n" .
+        "partial_bytes_");
+
+    Loop::runOnce();
+
+    expect($fileEmitted)->toBeTrue()
+        ->and($nestedFileStream)->not->toBeNull()
+        ->and($nestedFileStream->isReadable())->toBeTrue()
+        ->and($bodyStream->isReadable())->toBeTrue();
+
+    $promise->cancel();
+
+    Loop::runOnce();
+
+    expect($promise->isCancelled())->toBeTrue()
+        ->and($bodyStream->isReadable())->toBeFalse()
+        ->and($nestedFileStream->isReadable())->toBeFalse();
 });

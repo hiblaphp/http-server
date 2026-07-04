@@ -7,6 +7,9 @@ namespace Tests\Message;
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
 use Hibla\HttpServer\Message\MultipartParser;
+use Hibla\Promise\Promise;
+
+use function Hibla\await;
 
 afterEach(function () {
     Loop::reset();
@@ -219,5 +222,55 @@ it('emits a MultipartPartTooLargeException if headers exceed the configured limi
         ->and($exceptionClass)->toBe(MultipartPartTooLargeException::class)
         ->and($errorMessage)->toContain('headers too large')
         ->and($parser->isWritable())->toBeFalse()
+    ;
+});
+
+it('safely handles Loop-scheduled Fiber suspension inside the file event listener without state corruption', function () {
+    $boundary = 'boundary123';
+    $parser = new MultipartParser($boundary, 1024);
+
+    $fileEmitted = false;
+    $chunksReceived = '';
+    $ended = false;
+
+    $parser->on('file', function ($name, $filename, $mime, $fileStream) use (&$fileEmitted, &$chunksReceived) {
+        $fileEmitted = true;
+
+        $fileStream->on('data', function ($chunk) use (&$chunksReceived) {
+            $chunksReceived .= $chunk;
+        });
+
+        await(new Promise(function ($resolve) use ($fileStream) {
+            $fileStream->on('end', $resolve);
+        }));
+    });
+
+    $parser->on('end', function () use (&$ended) {
+        $ended = true;
+    });
+
+    $firstChunk = "--boundary123\r\n" .
+        "Content-Disposition: form-data; name=\"avatar\"; filename=\"photo.jpg\"\r\n" .
+        "Content-Type: image/jpeg\r\n\r\n" .
+        'first_binary_chunk_';
+
+    $secondChunk = "second_binary_chunk\r\n--boundary123--\r\n";
+
+    $fiber = new \Fiber(function () use ($parser, $firstChunk) {
+        $parser->write($firstChunk);
+    });
+
+    Loop::addFiber($fiber);
+
+    Loop::setImmediate(function () use ($parser, $secondChunk) {
+        $parser->write($secondChunk);
+        $parser->end();
+    });
+
+    Loop::run();
+
+    expect($fileEmitted)->toBeTrue()
+        ->and($chunksReceived)->toBe('first_binary_chunk_second_binary_chunk')
+        ->and($ended)->toBeTrue()
     ;
 });

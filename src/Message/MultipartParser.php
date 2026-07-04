@@ -103,7 +103,17 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
      */
     public function close(): void
     {
+        if (! $this->writable) {
+            return;
+        }
+
         $this->writable = false;
+
+        // Forcefully close the active file stream to abort any in-flight uploads on cancellation
+        if ($this->currentFileStream !== null) {
+            $this->currentFileStream->close();
+            $this->currentFileStream = null;
+        }
     }
 
     private function parseBuffer(): void
@@ -159,8 +169,8 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
 
                     $rawHeaders = substr($this->buffer, 0, $pos);
                     $this->buffer = substr($this->buffer, $pos + 4);
-                    $this->processHeaders($rawHeaders);
                     $this->state = self::STATE_BODY;
+                    $this->processHeaders($rawHeaders);
                 } else {
                     // Prevent memory exhaustion from malicious header blocks
                     // that drip in slowly and never send \r\n\r\n
@@ -181,10 +191,10 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
                     if ($chunk !== '') {
                         $this->emitChunk($chunk);
                     }
-                    $this->finishCurrentPart();
-
                     $this->buffer = substr($this->buffer, $pos + \strlen($marker));
                     $this->state = self::STATE_BOUNDARY_SUFFIX;
+
+                    $this->finishCurrentPart();
                 } else {
                     // No complete boundary found. Emit data up to the safe margin.
                     $markerLen = \strlen($marker);
@@ -243,7 +253,7 @@ class MultipartParser extends EventEmitter implements WritableStreamInterface
         }
 
         if ($this->currentFilename !== null) {
-            $this->currentFileStream = new ThroughStream();
+            $this->currentFileStream = new MultipartFileStream();
             $this->emit('file', [$this->currentName, $this->currentFilename, $this->currentMime, $this->currentFileStream]);
         } else {
             $this->currentFieldBuffer = '';
