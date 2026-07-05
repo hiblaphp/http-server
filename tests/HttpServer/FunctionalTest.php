@@ -107,7 +107,8 @@ describe('Core HTTP Functionality', function () {
                         $resolveEvents(true);
                     }
                 })
-                ->connect();
+                ->connect()
+            ;
 
             $connection = await($promise);
             await($eventsCollected);
@@ -255,7 +256,7 @@ describe('Browser-Like Simulation', function () {
             expect($htmlResponse->status())->toBe(200);
 
             $assets = ['/style.css', '/app.js', '/logo.png'];
-            $promises = array_map(fn($asset) => Http::get($url . $asset), $assets);
+            $promises = array_map(fn ($asset) => Http::get($url . $asset), $assets);
 
             $responses = await(Promise::all($promises));
 
@@ -506,9 +507,9 @@ describe('Advanced Client-Server Interactions', function () {
 
             $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n");
 
-            Loop::addTimer(0.01, fn() => $connection->write('Slo'));
-            Loop::addTimer(0.02, fn() => $connection->write('w '));
-            Loop::addTimer(0.03, fn() => $connection->write('Client'));
+            Loop::addTimer(0.01, fn () => $connection->write('Slo'));
+            Loop::addTimer(0.02, fn () => $connection->write('w '));
+            Loop::addTimer(0.03, fn () => $connection->write('Client'));
 
             $responsePromise = new Promise(function ($resolve) use ($connection) {
                 $buffer = '';

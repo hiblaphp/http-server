@@ -275,7 +275,7 @@ describe('Multipart Advanced Cancellation Testing', function () {
 
 describe('Multipart Stream-Only Parsing (streamMultipart)', function () {
 
-   it('streams multipart payloads on-the-fly and invokes callbacks with zero disk I/O', function () {
+    it('streams multipart payloads on-the-fly and invokes callbacks with zero disk I/O', function () {
         $boundary = 'boundary123';
         $payload = "--{$boundary}\r\n" .
             "Content-Disposition: form-data; name=\"username\"\r\n\r\n" .
@@ -326,14 +326,15 @@ describe('Multipart Stream-Only Parsing (streamMultipart)', function () {
 
         expect($fields)->toBe([
             'username' => 'john_doe',
-            'email' => 'john@example.com'
+            'email' => 'john@example.com',
         ]);
 
         expect($files)->toHaveCount(1)
             ->and($files[0]['name'])->toBe('avatar')
             ->and($files[0]['filename'])->toBe('avatar.png')
             ->and($files[0]['mime'])->toBe('image/png')
-            ->and($files[0]['content'])->toBe('binary_data_123');
+            ->and($files[0]['content'])->toBe('binary_data_123')
+        ;
     });
 
     it('aborts parsing and closes all active, nested streams when the streamMultipart promise is cancelled mid-progress', function () {
@@ -361,21 +362,23 @@ describe('Multipart Stream-Only Parsing (streamMultipart)', function () {
         $bodyStream->write("--{$boundary}\r\n" .
             "Content-Disposition: form-data; name=\"avatar\"; filename=\"big_file.bin\"\r\n" .
             "Content-Type: application/octet-stream\r\n\r\n" .
-            "partial_bytes_");
+            'partial_bytes_');
 
         Loop::runOnce();
 
         expect($fileEmitted)->toBeTrue()
             ->and($nestedFileStream)->not->toBeNull()
             ->and($nestedFileStream->isReadable())->toBeTrue()
-            ->and($bodyStream->isReadable())->toBeTrue();
+            ->and($bodyStream->isReadable())->toBeTrue()
+        ;
 
         $promise->cancel();
 
         Loop::runOnce();
 
         expect($promise->isCancelled())->toBeTrue()
-            ->and($bodyStream->isReadable())->toBeFalse() 
-            ->and($nestedFileStream->isReadable())->toBeFalse();
+            ->and($bodyStream->isReadable())->toBeFalse()
+            ->and($nestedFileStream->isReadable())->toBeFalse()
+        ;
     });
 });

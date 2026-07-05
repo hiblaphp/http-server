@@ -141,8 +141,9 @@ it('rejects getParsedBody if content-type header is not multipart or lacks bound
         '{}'
     );
 
-    expect(fn() => await($request->getParsedBody()))
-        ->toThrow(RuntimeException::class, 'Not a valid multipart/form-data request');
+    expect(fn () => await($request->getParsedBody()))
+        ->toThrow(RuntimeException::class, 'Not a valid multipart/form-data request')
+    ;
 });
 
 it('closes the body stream and cancels nested operations when getParsedBody promise is cancelled', function () {
@@ -171,8 +172,6 @@ it('closes the body stream and cancels nested operations when getParsedBody prom
     ;
 });
 
-
-
 it('streams multipart form-data on-the-fly and invokes callbacks correctly', function () {
     $boundary = 'boundary123';
     $payload = "--{$boundary}\r\n" .
@@ -196,7 +195,7 @@ it('streams multipart form-data on-the-fly and invokes callbacks correctly', fun
 
     await($request->streamMultipart(
         onFile: function (string $name, string $filename, string $mime, $fileStream) use (&$files): void {
-            $contentPromise = new \Hibla\Promise\Promise(function ($resolve, $reject) use ($fileStream) {
+            $contentPromise = new Hibla\Promise\Promise(function ($resolve, $reject) use ($fileStream) {
                 $buffer = '';
                 $fileStream->on('data', function (string $chunk) use (&$buffer) {
                     $buffer .= $chunk;
@@ -224,7 +223,8 @@ it('streams multipart form-data on-the-fly and invokes callbacks correctly', fun
         ->and($files[0]['name'])->toBe('file1')
         ->and($files[0]['filename'])->toBe('test.txt')
         ->and($files[0]['mime'])->toBe('text/plain')
-        ->and($files[0]['content'])->toBe('file_content_123');
+        ->and($files[0]['content'])->toBe('file_content_123')
+    ;
 });
 
 it('rejects streamMultipart with MalformedMultipartException if Content-Type lacks a boundary', function () {
@@ -235,8 +235,9 @@ it('rejects streamMultipart with MalformedMultipartException if Content-Type lac
         ''
     );
 
-    expect(fn() => await($request->streamMultipart(fn() => null)))
-        ->toThrow(MalformedMultipartException::class, 'Not a valid multipart/form-data request');
+    expect(fn () => await($request->streamMultipart(fn () => null)))
+        ->toThrow(MalformedMultipartException::class, 'Not a valid multipart/form-data request')
+    ;
 });
 
 it('closes the parent request body stream and cancels all nested operations when streamMultipart promise is cancelled', function () {
@@ -264,14 +265,15 @@ it('closes the parent request body stream and cancels all nested operations when
     $bodyStream->write("--{$boundary}\r\n" .
         "Content-Disposition: form-data; name=\"avatar\"; filename=\"photo.png\"\r\n" .
         "Content-Type: image/png\r\n\r\n" .
-        "partial_bytes_");
+        'partial_bytes_');
 
     Loop::runOnce();
 
     expect($fileEmitted)->toBeTrue()
         ->and($nestedFileStream)->not->toBeNull()
         ->and($nestedFileStream->isReadable())->toBeTrue()
-        ->and($bodyStream->isReadable())->toBeTrue();
+        ->and($bodyStream->isReadable())->toBeTrue()
+    ;
 
     $promise->cancel();
 
