@@ -62,6 +62,8 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
 
     /**
      * {@inheritDoc}
+     *
+     * @param mixed $event
      */
     public function on($event, callable $listener): void
     {
@@ -263,8 +265,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         $promise->onCancel(function () use ($promise) {
             foreach ($this->readQueue as $index => $item) {
                 if ($item['promise'] === $promise) {
-                    unset($this->readQueue[$index]);
-                    $this->readQueue = array_values($this->readQueue);
+                    array_splice($this->readQueue, $index, 1);
                     break;
                 }
             }
@@ -329,14 +330,17 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
 
         $endDestination = (bool) ($options['end'] ?? true);
         $totalBytes = 0;
-        $cancelled = false;
-        $hasError = false;
+        
+        $state = new class() {
+            public bool $cancelled = false;
+            public bool $hasError = false;
+        };
 
         /** @var Promise<int> $promise */
         $promise = new Promise();
 
-        $dataHandler = function (string $data) use ($destination, &$totalBytes, &$cancelled, &$hasError): void {
-            if ($cancelled || $hasError) {
+        $dataHandler = function (string $data) use ($destination, &$totalBytes, $state): void {
+            if ($state->cancelled || $state->hasError) {
                 return;
             }
 
@@ -347,8 +351,8 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
             }
         };
 
-        $endHandler = function () use ($promise, $destination, $endDestination, &$totalBytes, &$cancelled, &$hasError, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler): void {
-            if ($cancelled || $hasError) {
+        $endHandler = function () use ($promise, $destination, $endDestination, &$totalBytes, $state, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler): void {
+            if ($state->cancelled || $state->hasError) {
                 return;
             }
 
@@ -363,24 +367,24 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
             }
         };
 
-        $errorHandler = function ($error) use ($promise, $destination, &$cancelled, &$hasError, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler): void {
-            if ($cancelled || $hasError) {
+        $errorHandler = function ($error) use ($promise, $destination, $state, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler): void {
+            if ($state->cancelled || $state->hasError) {
                 return;
             }
 
-            $hasError = true;
+            $state->hasError = true;
             $this->detachPipeHandlers($destination, $dataHandler, $endHandler, $errorHandler, $closeHandler);
             $promise->reject($error);
         };
 
-        $closeHandler = function () use ($promise, $destination, &$cancelled, &$hasError, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler): void {
-            if ($cancelled || $hasError) {
+        $closeHandler = function () use ($promise, $destination, $state, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler): void {
+            if ($state->cancelled || $state->hasError) {
                 return;
             }
 
             $this->detachPipeHandlers($destination, $dataHandler, $endHandler, $errorHandler, $closeHandler);
             if ($this->isReadable() && ! $this->endedEarly) {
-                $hasError = true;
+                $state->hasError = true;
                 $promise->reject(new \RuntimeException('Destination closed before transfer completed'));
             }
         };
@@ -390,17 +394,18 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         $this->on('error', $errorHandler);
         $destination->on('close', $closeHandler);
 
-        $drainHandler = function () use (&$cancelled, &$hasError): void {
-            if ($cancelled || $hasError) {
+        $drainHandler = function () use ($state): void {
+            if ($state->cancelled || $state->hasError) {
                 return;
             }
 
             $this->resume();
         };
+        
         $destination->on('drain', $drainHandler);
 
-        $promise->onCancel(function () use (&$cancelled, $destination, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler, &$drainHandler): void {
-            $cancelled = true;
+        $promise->onCancel(function () use ($state, $destination, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler, &$drainHandler): void {
+            $state->cancelled = true;
             $this->pause();
             $this->detachPipeHandlers($destination, $dataHandler, $endHandler, $errorHandler, $closeHandler);
             $destination->removeListener('drain', $drainHandler);

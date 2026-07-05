@@ -10,6 +10,7 @@ use Hibla\HttpServer\Exceptions\MultipartException;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
+use Hibla\Stream\Interfaces\PromiseReadableStreamInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
 use Hibla\Stream\Stream;
 
@@ -214,7 +215,7 @@ class Request extends AbstractMessage
      * Streams the multipart request body on-the-fly, invoking callbacks for each field and file part.
      * Prevents any local disk I/O, allowing developers to stream file uploads directly to S3/Object Storage.
      *
-     * @param callable(string $name, string $filename, string $mime, ReadableStreamInterface $fileStream): void $onFile
+     * @param callable(string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream): void $onFile
      * @param (callable(string $name, string $value): void)|null $onField
      *
      * @return PromiseInterface<void>
@@ -234,20 +235,22 @@ class Request extends AbstractMessage
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
             $parser = new MultipartParser($boundary);
 
-            $pendingFibers = 0;
-            $parserEnded = false;
+            $state = new class() {
+                public int $pendingFibers = 0;
+                public bool $parserEnded = false;
+            };
 
-            $parser->on('file', function (string $name, string $filename, string $mime, $fileStream) use ($onFile, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
-                $pendingFibers++;
+            $parser->on('file', function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use ($onFile, $state, $resolve, $reject): void {
+                $state->pendingFibers++;
 
-                $fiber = new \Fiber(function () use ($onFile, $name, $filename, $mime, $fileStream, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
+                $fiber = new \Fiber(function () use ($onFile, $name, $filename, $mime, $fileStream, $state, $resolve, $reject): void {
                     try {
                         $onFile($name, $filename, $mime, $fileStream);
                     } catch (\Throwable $e) {
                         $reject($e);
                     } finally {
-                        $pendingFibers--;
-                        if ($pendingFibers === 0 && $parserEnded) {
+                        $state->pendingFibers--;
+                        if ($state->pendingFibers === 0 && $state->parserEnded) {
                             $resolve(null);
                         }
                     }
@@ -257,17 +260,17 @@ class Request extends AbstractMessage
             });
 
             if ($onField !== null) {
-                $parser->on('field', function (string $name, string $value) use ($onField, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
-                    $pendingFibers++;
+                $parser->on('field', function (string $name, string $value) use ($onField, $state, $resolve, $reject): void {
+                    $state->pendingFibers++;
 
-                    $fiber = new \Fiber(function () use ($onField, $name, $value, &$pendingFibers, &$parserEnded, $resolve, $reject): void {
+                    $fiber = new \Fiber(function () use ($onField, $name, $value, $state, $resolve, $reject): void {
                         try {
                             $onField($name, $value);
                         } catch (\Throwable $e) {
                             $reject($e);
                         } finally {
-                            $pendingFibers--;
-                            if ($pendingFibers === 0 && $parserEnded) {
+                            $state->pendingFibers--;
+                            if ($state->pendingFibers === 0 && $state->parserEnded) {
                                 $resolve(null);
                             }
                         }
@@ -277,9 +280,9 @@ class Request extends AbstractMessage
                 });
             }
 
-            $parser->on('end', function () use (&$pendingFibers, &$parserEnded, $resolve): void {
-                $parserEnded = true;
-                if ($pendingFibers === 0) {
+            $parser->on('end', function () use ($state, $resolve): void {
+                $state->parserEnded = true;
+                if ($state->pendingFibers === 0) {
                     $resolve(null);
                 }
             });
