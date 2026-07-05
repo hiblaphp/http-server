@@ -194,13 +194,14 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
                     if (! $item['promise']->isCancelled()) {
                         $item['resolve'](null);
                     }
-                    
+
                     if (! $this->closed && $this->readQueue === []) {
                         parent::end();
                     }
-                    
+
                     continue;
                 }
+
                 break;
             }
 
@@ -257,8 +258,8 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         $promise = new Promise();
         $this->readQueue[] = [
             'resolve' => fn (?string $val) => $promise->resolve($val),
-            'reject'  => fn (\Throwable $err) => $promise->reject($err),
-            'length'  => $len,
+            'reject' => fn (\Throwable $err) => $promise->reject($err),
+            'length' => $len,
             'promise' => $promise,
         ];
 
@@ -266,6 +267,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
             foreach ($this->readQueue as $index => $item) {
                 if ($item['promise'] === $promise) {
                     array_splice($this->readQueue, $index, 1);
+
                     break;
                 }
             }
@@ -283,6 +285,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
             if (! $this->closed) {
                 parent::end();
             }
+
             return Promise::resolved(null);
         }
 
@@ -330,9 +333,10 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
 
         $endDestination = (bool) ($options['end'] ?? true);
         $totalBytes = 0;
-        
-        $state = new class() {
+
+        $state = new class () {
             public bool $cancelled = false;
+
             public bool $hasError = false;
         };
 
@@ -345,7 +349,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
             }
 
             $feedMore = $destination->write($data);
-            $totalBytes += strlen($data);
+            $totalBytes += \strlen($data);
             if ($feedMore === false) {
                 $this->pause();
             }
@@ -401,7 +405,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
 
             $this->resume();
         };
-        
+
         $destination->on('drain', $drainHandler);
 
         $promise->onCancel(function () use ($state, $destination, &$dataHandler, &$endHandler, &$errorHandler, &$closeHandler, &$drainHandler): void {
@@ -412,7 +416,8 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         });
 
         // Register a dummy 'data' listener to trick the internal microTask into flushing if data exists
-        $this->on('data', function () {}); 
+        $this->on('data', function () {
+        });
 
         $this->resume();
 

@@ -6,10 +6,12 @@ use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\MalformedMultipartException;
 use Hibla\HttpServer\Message\MultipartForm;
 use Hibla\HttpServer\Message\Request;
+use Hibla\Stream\Interfaces\PromiseReadableStreamInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
 use Hibla\Stream\ThroughStream;
 
 use function Hibla\await;
+use function Hibla\delay;
 
 afterEach(function () {
     Loop::reset();
@@ -281,5 +283,158 @@ it('closes the parent request body stream and cancels all nested operations when
 
     expect($promise->isCancelled())->toBeTrue()
         ->and($bodyStream->isReadable())->toBeFalse()
-        ->and($nestedFileStream->isReadable())->toBeFalse();
+        ->and($nestedFileStream->isReadable())->toBeFalse()
+    ;
+});
+
+it('streams multipart form-data on-the-fly and reads file content cleanly via readAllAsync', function () {
+    $boundary = 'boundary123';
+    $payload = "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"field1\"\r\n\r\n" .
+        "value1\r\n" .
+        "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"file1\"; filename=\"test.txt\"\r\n" .
+        "Content-Type: text/plain\r\n\r\n" .
+        "file_content_123\r\n" .
+        "--{$boundary}--\r\n";
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $payload
+    );
+
+    $fields = [];
+    $files = [];
+
+    await($request->streamMultipart(
+        onFile: function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use (&$files): void {
+            $files[] = [
+                'name' => $name,
+                'filename' => $filename,
+                'mime' => $mime,
+                'content' => await($fileStream->readAllAsync()),
+            ];
+        },
+        onField: function (string $name, string $value) use (&$fields): void {
+            $fields[$name] = $value;
+        }
+    ));
+
+    expect($fields)->toBe(['field1' => 'value1'])
+        ->and($files)->toHaveCount(1)
+        ->and($files[0]['name'])->toBe('file1')
+        ->and($files[0]['filename'])->toBe('test.txt')
+        ->and($files[0]['mime'])->toBe('text/plain')
+        ->and($files[0]['content'])->toBe('file_content_123')
+    ;
+});
+
+it('allows reading streamed file parts chunk-by-chunk using readAsync', function () {
+    $boundary = 'boundary123';
+    $payload = "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"doc\"; filename=\"test.txt\"\r\n" .
+        "Content-Type: text/plain\r\n\r\n" .
+        "chunk1_chunk2\r\n" .
+        "--{$boundary}--\r\n";
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $payload
+    );
+
+    $chunks = [];
+
+    await($request->streamMultipart(
+        onFile: function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use (&$chunks): void {
+            while (($chunk = await($fileStream->readAsync(6))) !== null) {
+                $chunks[] = $chunk;
+            }
+        }
+    ));
+
+    expect($chunks)->toBe(['chunk1', '_chunk', '2']);
+});
+
+it('allows piping streamed file parts to another destination using pipeAsync', function () {
+    $boundary = 'boundary123';
+    $payload = "--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"doc\"; filename=\"pipe.txt\"\r\n" .
+        "Content-Type: text/plain\r\n\r\n" .
+        "piped_stream_data\r\n" .
+        "--{$boundary}--\r\n";
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $payload
+    );
+
+    $destStream = new ThroughStream();
+    $pipedContent = '';
+    $destStream->on('data', function (string $chunk) use (&$pipedContent) {
+        $pipedContent .= $chunk;
+    });
+
+    $bytesPiped = 0;
+
+    await($request->streamMultipart(
+        onFile: function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use ($destStream, &$bytesPiped): void {
+            $bytesPiped = await($fileStream->pipeAsync($destStream));
+        }
+    ));
+
+    expect($pipedContent)->toBe('piped_stream_data')
+        ->and($bytesPiped)->toBe(17)
+    ;
+});
+
+it('closes the parent request body and cancels all nested readAllAsync operations when streamMultipart is cancelled', function () {
+    $boundary = 'boundary123';
+    $bodyStream = new ThroughStream();
+
+    $request = new Request(
+        'POST',
+        '/',
+        ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
+        $bodyStream
+    );
+
+    $readPromise = null;
+    $caughtException = null;
+
+    $promise = $request->streamMultipart(
+        onFile: function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use (&$readPromise, &$caughtException): void {
+            $readPromise = $fileStream->readAllAsync();
+
+            try {
+                await($readPromise);
+            } catch (RuntimeException $e) {
+                $caughtException = $e;
+            }
+        }
+    );
+
+    $bodyStream->write("--{$boundary}\r\n" .
+        "Content-Disposition: form-data; name=\"avatar\"; filename=\"photo.png\"\r\n" .
+        "Content-Type: image/png\r\n\r\n" .
+        'partial_bytes_');
+
+    await(delay(0.01));
+
+    expect($readPromise)->not->toBeNull();
+
+    $promise->cancel();
+
+    await(delay(0.01));
+
+    expect($promise->isCancelled())->toBeTrue()
+        ->and($bodyStream->isReadable())->toBeFalse()
+        ->and($caughtException)->toBeInstanceOf(RuntimeException::class)
+        ->and($caughtException->getMessage())->toBe('Stream closed')
+    ;
 });

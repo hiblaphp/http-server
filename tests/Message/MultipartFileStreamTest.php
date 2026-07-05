@@ -67,7 +67,7 @@ describe('Event-driven API', function () {
     it('handles late pipe() attachments perfectly without losing a single byte of data', function () {
         $source = new MultipartFileStream();
 
-        $destination = new class() extends EventEmitter implements WritableStreamInterface {
+        $destination = new class () extends EventEmitter implements WritableStreamInterface {
             public string $buffer = '';
 
             public bool $writable = true;
@@ -217,7 +217,7 @@ describe('Promise-based API', function () {
 
         expect($line1)->toBe("Line 1\n")
             ->and($line2)->toBe("Line 2\n")
-            ->and($line3)->toBe("Line 3")
+            ->and($line3)->toBe('Line 3')
             ->and($line4)->toBeNull()
         ;
     });
@@ -241,25 +241,32 @@ describe('Promise-based API', function () {
     it('pipes data asynchronously via pipeAsync() and resolves with total byte count', function () {
         $source = new MultipartFileStream();
 
-        $destination = new class() extends EventEmitter implements WritableStreamInterface {
+        $destination = new class () extends EventEmitter implements WritableStreamInterface {
             public string $buffer = '';
+
             public bool $writable = true;
 
             public function write(string $data): bool
             {
                 $this->buffer .= $data;
+
                 return true;
             }
+
             public function end(?string $data = null): void
             {
-                if ($data !== null) $this->write($data);
+                if ($data !== null) {
+                    $this->write($data);
+                }
                 $this->writable = false;
                 $this->emit('finish');
             }
+
             public function isWritable(): bool
             {
                 return $this->writable;
             }
+
             public function close(): void
             {
                 $this->writable = false;
@@ -289,7 +296,7 @@ describe('Promise Cancellation', function () {
 
     it('cancels readAsync() and leaves subsequent bytes safely in the buffer', function () {
         $stream = new MultipartFileStream();
-        
+
         $promise = $stream->readAsync(1024);
 
         Loop::addTimer(0.01, function () use ($promise) {
@@ -336,7 +343,7 @@ describe('Promise Cancellation', function () {
         }
 
         await(delay(0.03));
-        
+
         $leftover = await($stream->readAsync());
         expect($leftover)->toBe('chunk_2');
     });
@@ -347,25 +354,43 @@ describe('Promise Cancellation', function () {
         $bytesReceived = 0;
         $destination = new class ($bytesReceived) extends EventEmitter implements WritableStreamInterface {
             public string $buffer = '';
+
             public bool $writable = true;
+
             public int $bytes = 0;
 
-            public function __construct(int &$bytes) {
+            public function __construct(int &$bytes)
+            {
                 $this->bytes = &$bytes;
             }
 
-            public function write(string $data): bool {
+            public function write(string $data): bool
+            {
                 $this->buffer .= $data;
-                $this->bytes += strlen($data);
+                $this->bytes += \strlen($data);
+
                 return true;
             }
-            public function end(?string $data = null): void {
-                if ($data !== null) $this->write($data);
+
+            public function end(?string $data = null): void
+            {
+                if ($data !== null) {
+                    $this->write($data);
+                }
                 $this->writable = false;
                 $this->emit('finish');
             }
-            public function isWritable(): bool { return $this->writable; }
-            public function close(): void { $this->writable = false; $this->emit('close'); }
+
+            public function isWritable(): bool
+            {
+                return $this->writable;
+            }
+
+            public function close(): void
+            {
+                $this->writable = false;
+                $this->emit('close');
+            }
         };
 
         $promise = $source->pipeAsync($destination);

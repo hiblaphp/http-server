@@ -235,8 +235,9 @@ class Request extends AbstractMessage
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
             $parser = new MultipartParser($boundary);
 
-            $state = new class() {
+            $state = new class () {
                 public int $pendingFibers = 0;
+
                 public bool $parserEnded = false;
             };
 

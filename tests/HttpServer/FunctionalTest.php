@@ -13,6 +13,7 @@ use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\HttpServer\Message\SseStream as ServerSseStream;
 use Hibla\Promise\Promise;
 use Hibla\Socket\Connector;
+use Hibla\Stream\Interfaces\PromiseReadableStreamInterface;
 use Hibla\Stream\Stream;
 use Hibla\Stream\ThroughStream;
 
@@ -985,6 +986,63 @@ describe('Advanced Client-Server Interactions', function () {
 
         $localClientFile = tempnam(sys_get_temp_dir(), 'client_side_');
         $filePayload = 'S3-Direct-Streaming-Multipart-Payload-Data-Check-123';
+        file_put_contents($localClientFile, $filePayload);
+
+        try {
+            $response = await(Http::client()
+                ->multipartWithFiles(
+                    data: ['album' => 'vacation_2026'],
+                    files: ['photo' => $localClientFile]
+                )
+                ->post($url . '/upload-to-s3'));
+
+            expect($response->status())->toBe(200)
+                ->and($response->json('success'))->toBeTrue()
+                ->and($response->json('target'))->toBe('s3://my-bucket/' . basename($localClientFile))
+                ->and($response->json('bytes_received'))->toBe(strlen($filePayload))
+                ->and($response->json('content_preview'))->toBe($filePayload)
+                ->and($response->json('album'))->toBe('vacation_2026')
+            ;
+        } finally {
+            if (file_exists($localClientFile)) {
+                unlink($localClientFile);
+            }
+            $socket->close();
+        }
+    });
+
+    it('streams uploaded files directly to an external service (S3 simulation) in-memory using promise-based streamMultipart with zero local disk IO', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $s3UploadedData = '';
+            $s3UploadedFilename = '';
+            $fields = [];
+
+            try {
+                await($request->streamMultipart(
+                    onFile: function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use (&$s3UploadedData, &$s3UploadedFilename): void {
+                        $s3UploadedFilename = $filename;
+
+                        $s3UploadedData = await($fileStream->readAllAsync());
+                    },
+                    onField: function (string $name, string $value) use (&$fields): void {
+                        $fields[$name] = $value;
+                    }
+                ));
+
+                return ServerResponse::json([
+                    'success' => true,
+                    'target' => 's3://my-bucket/' . $s3UploadedFilename,
+                    'bytes_received' => strlen($s3UploadedData),
+                    'content_preview' => $s3UploadedData,
+                    'album' => $fields['album'] ?? null,
+                ]);
+            } catch (Throwable $e) {
+                return new ServerResponse(500, [], $e->getMessage());
+            }
+        }, streamingRequests: true);
+
+        $localClientFile = tempnam(sys_get_temp_dir(), 'client_side_');
+        $filePayload = 'S3-Promise-Direct-Streaming-Multipart-Payload-123';
         file_put_contents($localClientFile, $filePayload);
 
         try {
