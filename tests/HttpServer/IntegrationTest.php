@@ -18,6 +18,8 @@ function runConfigTest(callable $configureServer, callable $clientActions): void
         test()->markTestSkipped('Process forking is not supported on Windows.');
     }
 
+    gc_collect_cycles();
+
     $port = random_int(10000, 15000);
     $address = "127.0.0.1:{$port}";
 
@@ -55,6 +57,8 @@ function runClusterConfigTest(callable $configureServer, callable $clientActions
     if (PHP_OS_FAMILY === 'Windows') {
         test()->markTestSkipped('Clustered process forking is not supported on Windows.');
     }
+
+    gc_collect_cycles();
 
     $port = random_int(10000, 15000);
     $address = "127.0.0.1:{$port}";

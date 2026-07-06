@@ -1052,7 +1052,42 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $drainListener = $body->resume(...);
         $this->connection->on('drain', $drainListener);
 
-        $body->on('data', function (string $chunk) use ($isChunkedResponse, $body) {
+        /** @var (\Closure(string): void)|null $dataListener */
+        $dataListener = null;
+        /** @var (\Closure(): void)|null $endListener */
+        $endListener = null;
+        /** @var (\Closure(): void)|null $errorListener */
+        $errorListener = null;
+        /** @var (\Closure(): void)|null $closeListener */
+        $closeListener = null;
+
+        $cleanupListeners = function () use (
+            $body,
+            $connectionCloseListener,
+            $drainListener,
+            &$dataListener,
+            &$endListener,
+            &$errorListener,
+            &$closeListener,
+        ): void {
+            $this->connection->removeListener('close', $connectionCloseListener);
+            $this->connection->removeListener('drain', $drainListener);
+
+            if ($dataListener !== null) {
+                $body->removeListener('data', $dataListener);
+            }
+            if ($endListener !== null) {
+                $body->removeListener('end', $endListener);
+            }
+            if ($errorListener !== null) {
+                $body->removeListener('error', $errorListener);
+            }
+            if ($closeListener !== null) {
+                $body->removeListener('close', $closeListener);
+            }
+        };
+
+        $dataListener = function (string $chunk) use ($isChunkedResponse, $body): void {
             if ($isChunkedResponse) {
                 $canContinue = $this->connection->write(dechex(\strlen($chunk)) . "\r\n" . $chunk . "\r\n");
             } else {
@@ -1062,11 +1097,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             if ($canContinue === false) {
                 $body->pause();
             }
-        });
+        };
 
-        $body->on('end', function () use ($isChunkedResponse, $shouldClose, $connectionCloseListener, $drainListener, $triggerComplete) {
-            $this->connection->removeListener('close', $connectionCloseListener);
-            $this->connection->removeListener('drain', $drainListener);
+        $endListener = function () use ($isChunkedResponse, $shouldClose, $cleanupListeners, $triggerComplete): void {
+            $cleanupListeners();
 
             $finalChunk = $isChunkedResponse ? "0\r\n\r\n" : '';
 
@@ -1084,18 +1118,23 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                 $this->handleKeepAliveState();
             }
             $triggerComplete();
-        });
+        };
 
-        $body->on('error', function () use ($connectionCloseListener, $triggerComplete) {
-            $this->connection->removeListener('close', $connectionCloseListener);
+        $errorListener = function () use ($cleanupListeners, $triggerComplete): void {
+            $cleanupListeners();
             $this->connection->close();
             $triggerComplete();
-        });
+        };
 
-        $body->on('close', function () use ($connectionCloseListener, $triggerComplete) {
-            $this->connection->removeListener('close', $connectionCloseListener);
+        $closeListener = function () use ($cleanupListeners, $triggerComplete): void {
+            $cleanupListeners();
             $triggerComplete();
-        });
+        };
+
+        $body->on('data', $dataListener);
+        $body->on('end', $endListener);
+        $body->on('error', $errorListener);
+        $body->on('close', $closeListener);
 
         $body->resume();
     }

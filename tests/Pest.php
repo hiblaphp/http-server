@@ -6,6 +6,10 @@ use Hibla\HttpServer\HttpServer;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\SocketServer;
 
+uses()->afterEach(function () {
+    gc_collect_cycles();
+})->in(__DIR__);
+
 function debug(string $message): void
 {
     fwrite(STDERR, "[DEBUG] {$message}\n");
