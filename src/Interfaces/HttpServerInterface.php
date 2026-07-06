@@ -80,17 +80,6 @@ interface HttpServerInterface
     public function withMaxBodySize(int $bytes): static;
 
     /**
-     * Configure the server to deliver streaming request bodies instead of buffering them.
-     *
-     * When enabled, $request->getBody() returns a ReadableStreamInterface.
-     *
-     * @param bool $enable True to enable request streaming, false to buffer.
-     *
-     * @return static A new instance with streaming configured.
-     */
-    public function withStreamingRequests(bool $enable = true): static;
-
-    /**
      * Set the maximum number of concurrent connections allowed per worker process.
      *
      * @param int $limit Maximum number of connections.

@@ -84,7 +84,7 @@ use Hibla\Stream\Interfaces\ReadableStreamInterface;
  *   silently returns a float whose (int) cast is platform-dependent and could
  *   produce a negative chunk size, corrupting the read path entirely.
  *
- * - In streaming mode individual chunk sizes are capped at MAX_STREAMING_CHUNK_SIZE
+ * - Individual chunk sizes are unconditionally capped at MAX_STREAMING_CHUNK_SIZE
  *   (16 MiB) as a memory-safety bound independent of application-layer back-pressure.
  *
  * - Per-process header name formatting is memoised in $headerNameCache to avoid
@@ -136,8 +136,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private int $bufferOffset = 0;
 
-    private int $bufferedBodyBytes = 0;
-
     private ?Request $currentRequest = null;
 
     private ?RequestBodyStream $bodyStream = null;
@@ -159,11 +157,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     public ?\Closure $onEarlyResponse = null;
 
     /**
-     * @var list<string>
-     */
-    private array $bodyChunks = [];
-
-    /**
      * Per-process cache mapping lowercase wire-format header names (e.g. "content-type")
      * to their display-formatted equivalents (e.g. "Content-Type"). Populated lazily on
      * first encounter, eliminating repeated ucwords/str_replace calls for the same header
@@ -176,14 +169,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     /**
      * @param ConnectionInterface $connection The raw TCP/TLS connection
      * @param callable(Request, ProtocolHandlerInterface): void $onRequest Callback triggered when a full request is parsed
-     * @param int $maxBodySize Maximum body size in bytes for buffered (non-streaming) requests.
-     *                         In buffered mode this governs both the per-chunk cap (chunked TE)
-     *                         and the total accumulated body limit. In streaming mode neither
-     *                         limit applies so the application layer controls consumption and
-     *                         back-pressure via the RequestBodyStream pause/resume interface.
-     *                         Individual chunk sizes in streaming mode are independently capped
-     *                         at MAX_STREAMING_CHUNK_SIZE as a memory safety bound.
-     * @param bool $streamingRequests True to enable streaming request bodies
+     * @param int $maxBodySize Default body limit for Request Helper DX methods (e.g. getBufferedBody).
      * @param int $maxHeaderSize Maximum total size of the header block in bytes.
      * @param int $maxHeaderCount Maximum number of header fields allowed per request.
      * @param float|null $headerTimeout Maximum time allowed to receive complete headers (Slowloris protection).
@@ -195,7 +181,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         private readonly ConnectionInterface $connection,
         private readonly mixed $onRequest,
         private readonly int $maxBodySize = 10485760,
-        private readonly bool $streamingRequests = false,
         private readonly int $maxHeaderSize = 16384,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
@@ -474,16 +459,19 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         }
 
-        if ($this->streamingRequests) {
-            $this->bodyStream = new RequestBodyStream();
-            $this->bodyStream->on('pause', $this->connection->pause(...));
-            $this->bodyStream->on('resume', $this->connection->resume(...));
-            $request->setBody($this->bodyStream);
+        // Initialize the stream and attach it to the request unconditionally
+        $this->bodyStream = new RequestBodyStream();
+        $this->bodyStream->on('pause', $this->connection->pause(...));
+        $this->bodyStream->on('resume', $this->connection->resume(...));
+        $request->setBody($this->bodyStream);
 
-            $this->activeRequestsCount++;
-            if (\is_callable($this->onRequest)) {
-                ($this->onRequest)($request, $this);
-            }
+        // Expose configuration limit so Request helper methods know the configured max
+        $request->maxBodySize = $this->maxBodySize;
+
+        // Trigger the user's application logic IMMEDIATELY
+        $this->activeRequestsCount++;
+        if (\is_callable($this->onRequest)) {
+            ($this->onRequest)($request, $this);
         }
 
         if ($this->isChunked) {
@@ -518,9 +506,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bufferOffset += $chunkLength;
         $this->bytesRead += $chunkLength;
 
-        if (! $this->pushBodyData($chunk)) {
-            return false;
-        }
+        $this->pushBodyData($chunk);
 
         if ($this->bytesRead >= $this->expectedBodyLength) {
             $this->finalizeRequest();
@@ -568,32 +554,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return $this->parseChunkTrailerPhase();
         }
 
-        // Enforce a per-chunk size cap before entering STATE_CHUNK_DATA.
-        // Without this, a client that declares a chunk larger than the cap and then
-        // dribbles data holds the connection open while the buffer grows unbounded and
-        // parseChunkDataPhase() waits for the full declared size and pushBodyData()'s
-        // accumulated-size check is never reached.
-        //
-        // The cap differs by mode because maxBodySize means different things:
-        //   - Buffered mode: maxBodySize is both the per-chunk and total body limit.
-        //   - Streaming mode: maxBodySize is intentionally not enforced as a body limit
-        //     (the application layer owns that policy via back-pressure). A separate
-        //     constant caps individual chunk sizes purely as a memory safety bound.
-        $chunkSizeLimit = $this->streamingRequests
-            ? self::MAX_STREAMING_CHUNK_SIZE
-            : $this->maxBodySize;
-
-        if ($this->currentChunkSize > $chunkSizeLimit) {
-            $this->sendErrorAndClose(413, 'Payload Too Large');
-
-            return false;
-        }
-
-        // Pre-check cumulative size before parseChunkDataPhase allocates the substr.
-        // Without this, peak memory can briefly reach 2× maxBodySize: the accumulated
-        // $bodyChunks (just under maxBodySize) plus the substr allocation for the
-        // offending chunk that pushBodyData would then reject.
-        if (! $this->streamingRequests && $this->bufferedBodyBytes + $this->currentChunkSize > $this->maxBodySize) {
+        // We ONLY enforce MAX_STREAMING_CHUNK_SIZE now as a memory safety bound against malicious chunk headers
+        if ($this->currentChunkSize > self::MAX_STREAMING_CHUNK_SIZE) {
             $this->sendErrorAndClose(413, 'Payload Too Large');
 
             return false;
@@ -615,43 +577,24 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return false;
         }
 
-        if ($this->streamingRequests) {
-            $remaining = $this->currentChunkSize - $this->chunkBytesRead;
-            $canRead = min($remaining, $available);
+        $remaining = $this->currentChunkSize - $this->chunkBytesRead;
+        $canRead = min($remaining, $available);
 
-            if ($canRead > 0) {
-                $chunk = substr($this->buffer, $this->bufferOffset, $canRead);
-                $this->bufferOffset += $canRead;
-                $this->chunkBytesRead += $canRead;
+        if ($canRead > 0) {
+            $chunk = substr($this->buffer, $this->bufferOffset, $canRead);
+            $this->bufferOffset += $canRead;
+            $this->chunkBytesRead += $canRead;
 
-                if (! $this->pushBodyData($chunk)) {
-                    return false;
-                }
-            }
-
-            if ($this->chunkBytesRead >= $this->currentChunkSize) {
-                if (\strlen($this->buffer) - $this->bufferOffset < 2) {
-                    return false;
-                }
-
-                $this->bufferOffset += 2;
-                $this->chunkBytesRead = 0;
-                $this->state = self::STATE_CHUNK_SIZE;
-
-                return true;
-            }
-
-            return false;
+            $this->pushBodyData($chunk);
         }
 
-        if ($available >= $this->currentChunkSize + 2) {
-            $chunk = substr($this->buffer, $this->bufferOffset, $this->currentChunkSize);
-
-            if (! $this->pushBodyData($chunk)) {
+        if ($this->chunkBytesRead >= $this->currentChunkSize) {
+            if (\strlen($this->buffer) - $this->bufferOffset < 2) {
                 return false;
             }
 
-            $this->bufferOffset += $this->currentChunkSize + 2;
+            $this->bufferOffset += 2;
+            $this->chunkBytesRead = 0;
             $this->state = self::STATE_CHUNK_SIZE;
 
             return true;
@@ -774,10 +717,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->currentRequest->maxFormFields = $this->maxFormFields;
 
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
-
-        if (! $this->streamingRequests && $this->expectedBodyLength > $this->maxBodySize) {
-            throw new PayloadTooLargeException('Payload Too Large');
-        }
     }
 
     /**
@@ -1052,6 +991,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $drainListener = $body->resume(...);
         $this->connection->on('drain', $drainListener);
 
+        // Declare variables for stream listeners to allow their removal
         /** @var (\Closure(string): void)|null $dataListener */
         $dataListener = null;
         /** @var (\Closure(): void)|null $endListener */
@@ -1061,6 +1001,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         /** @var (\Closure(): void)|null $closeListener */
         $closeListener = null;
 
+        // Cleanup helper to fully detach the stream from the connection and prevent GC ghost events
         $cleanupListeners = function () use (
             $body,
             $connectionCloseListener,
@@ -1068,7 +1009,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             &$dataListener,
             &$endListener,
             &$errorListener,
-            &$closeListener,
+            &$closeListener
         ): void {
             $this->connection->removeListener('close', $connectionCloseListener);
             $this->connection->removeListener('drain', $drainListener);
@@ -1139,47 +1080,17 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $body->resume();
     }
 
-    private function pushBodyData(string $data): bool
+    private function pushBodyData(string $data): void
     {
-        if ($this->currentRequest === null) {
-            return true;
-        }
-
-        if ($this->streamingRequests && $this->bodyStream !== null) {
+        if ($this->bodyStream !== null) {
             $this->bodyStream->push($data);
-
-            return true;
         }
-
-        $this->bufferedBodyBytes += \strlen($data);
-
-        if ($this->bufferedBodyBytes > $this->maxBodySize) {
-            $this->sendErrorAndClose(413, 'Payload Too Large');
-
-            return false;
-        }
-
-        $this->bodyChunks[] = $data;
-
-        return true;
     }
 
     private function finalizeRequest(): void
     {
-        $request = $this->currentRequest;
-        if ($request === null) {
-            return;
-        }
-
-        if ($this->streamingRequests && $this->bodyStream !== null) {
+        if ($this->bodyStream !== null) {
             $this->bodyStream->end();
-        } else {
-            $request->setBody(implode('', $this->bodyChunks));
-
-            $this->activeRequestsCount++;
-            if (\is_callable($this->onRequest)) {
-                ($this->onRequest)($request, $this);
-            }
         }
 
         if ($this->state !== self::STATE_UPGRADED) {
@@ -1188,11 +1099,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         $this->currentRequest = null;
         $this->bodyStream = null;
-        $this->bodyChunks = [];
         $this->isChunked = false;
         $this->expectedBodyLength = 0;
         $this->bytesRead = 0;
-        $this->bufferedBodyBytes = 0;
+        $this->currentChunkSize = 0;
+        $this->chunkBytesRead = 0;
     }
 
     private function sendErrorAndClose(int $statusCode, string $reason): void
