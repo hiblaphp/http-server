@@ -188,6 +188,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * @param int $maxHeaderCount Maximum number of header fields allowed per request.
      * @param float|null $headerTimeout Maximum time allowed to receive complete headers (Slowloris protection).
      * @param float|null $keepAliveTimeout Maximum idle time allowed before closing a persistent connection.
+     * @param int $maxUploadedFiles Maximum number of uploaded files in multipart content type.
+     * @param int $maxFormFields maximum number of array of bodys in a multipart request.
      */
     public function __construct(
         private readonly ConnectionInterface $connection,
@@ -197,7 +199,9 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         private readonly int $maxHeaderSize = 16384,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
-        private readonly ?float $keepAliveTimeout = null
+        private readonly ?float $keepAliveTimeout = null,
+        private readonly int $maxUploadedFiles = 20,
+        private readonly int $maxFormFields = 1000
     ) {
         $this->handleConnectionCloseEvent();
         $this->startHeaderTimer();
@@ -766,6 +770,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
 
         $this->currentRequest->maxHeaderSize = $this->maxHeaderSize;
+        $this->currentRequest->maxUploadedFiles = $this->maxUploadedFiles;
+        $this->currentRequest->maxFormFields = $this->maxFormFields;
 
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
 

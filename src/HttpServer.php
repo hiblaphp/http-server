@@ -88,6 +88,16 @@ final class HttpServer implements HttpServerInterface
     private float $gracefulShutdownTimeout = 15.0;
 
     /**
+     * @var int Maximum file uploads per multipart request
+     */
+    private int $maxUploadedFiles = 20;
+
+    /**
+     * @var int Maximum form fields per multipart request
+     */
+    private int $maxFormFields = 1000;
+
+    /**
      * @var array<string, mixed> Socket context options
      */
     private array $context = [];
@@ -223,6 +233,18 @@ final class HttpServer implements HttpServerInterface
     {
         $clone = clone $this;
         $clone->maxBodySize = $bytes;
+
+        return $clone;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function withMultipartLimits(int $maxFiles, int $maxFields): static
+    {
+        $clone = clone $this;
+        $clone->maxUploadedFiles = $maxFiles;
+        $clone->maxFormFields = $maxFields;
 
         return $clone;
     }
@@ -367,7 +389,9 @@ final class HttpServer implements HttpServerInterface
             $this->maxHeaderCount,
             $this->headerTimeout,
             $this->keepAliveTimeout,
-            $this->maxConcurrentRequestsPerConnection
+            $this->maxConcurrentRequestsPerConnection,
+            $this->maxUploadedFiles,
+            $this->maxFormFields,
         );
 
         $this->setupSignalHandlers(function () use ($triggerShutdown) {
@@ -414,7 +438,9 @@ final class HttpServer implements HttpServerInterface
             $this->maxHeaderCount,
             $this->headerTimeout,
             $this->keepAliveTimeout,
-            $this->maxConcurrentRequestsPerConnection
+            $this->maxConcurrentRequestsPerConnection,
+            $this->maxUploadedFiles,
+            $this->maxFormFields,
         );
 
         $this->setupSignalHandlers(function () use ($socket, $triggerShutdown) {
@@ -459,6 +485,8 @@ final class HttpServer implements HttpServerInterface
             $this->onStartCallback,
             $this->gracefulShutdownTimeout,
             $this->maxConcurrentRequestsPerConnection,
+            $this->maxUploadedFiles,
+            $this->maxFormFields
         );
 
         $isShuttingDown = false;
@@ -604,7 +632,9 @@ final class HttpServer implements HttpServerInterface
         int $maxHeaderCount = 100,
         ?float $headerTimeout = null,
         ?float $keepAliveTimeout = null,
-        int $maxConcurrentRequestsPerConnection = 128
+        int $maxConcurrentRequestsPerConnection = 128,
+        int $maxUploadedFiles = 20,
+        int $maxFormFields = 1000
     ): callable {
         /** @var array<int, ConnectionManagerInterface> $activeManagers */
         $activeManagers = [];
@@ -619,6 +649,8 @@ final class HttpServer implements HttpServerInterface
             $keepAliveTimeout,
             $maxConcurrentRequestsPerConnection,
             &$activeManagers,
+            $maxUploadedFiles,
+            $maxFormFields,
         ): void {
 
             $manager = new Http11ConnectionManager(
@@ -629,7 +661,9 @@ final class HttpServer implements HttpServerInterface
                 $maxHeaderCount,
                 $headerTimeout,
                 $keepAliveTimeout,
-                $maxConcurrentRequestsPerConnection
+                $maxConcurrentRequestsPerConnection,
+                $maxUploadedFiles,
+                $maxFormFields
             );
 
             $managerId = spl_object_id($manager);

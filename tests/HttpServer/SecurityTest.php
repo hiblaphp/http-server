@@ -345,4 +345,87 @@ describe('Server Security Limits', function () {
         }
     });
 
+    it('rejects multipart payloads exceeding the maxUploadedFiles limit with an error', function () {
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                try {
+                    await($request->getParsedBody());
+
+                    return ServerResponse::plaintext('Should have failed');
+                } catch (Throwable $e) {
+                    return ServerResponse::plaintext('Caught: ' . $e->getMessage(), 400);
+                }
+            },
+            maxUploadedFiles: 2
+        );
+
+        $f1 = tempnam(sys_get_temp_dir(), 'test_f1_');
+        $f2 = tempnam(sys_get_temp_dir(), 'test_f2_');
+        $f3 = tempnam(sys_get_temp_dir(), 'test_f3_');
+
+        file_put_contents($f1, 'a');
+        file_put_contents($f2, 'b');
+        file_put_contents($f3, 'c');
+
+        try {
+            $response = await(
+                Http::client()
+                    ->multipartWithFiles(
+                        data: [],
+                        files: [
+                            'file1' => $f1,
+                            'file2' => $f2,
+                            'file3' => $f3,
+                        ]
+                    )
+                    ->post($url)
+            );
+
+            expect($response->status())->toBe(400)
+                ->and($response->body())->toContain('Too many file uploads in multipart body')
+            ;
+        } finally {
+            @unlink($f1);
+            @unlink($f2);
+            @unlink($f3);
+            $socket->close();
+        }
+    });
+
+    it('rejects multipart payloads exceeding the maxFormFields limit with an error', function () {
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                try {
+                    await($request->getParsedBody());
+
+                    return ServerResponse::plaintext('Should have failed');
+                } catch (Throwable $e) {
+                    return ServerResponse::plaintext('Caught: ' . $e->getMessage(), 400);
+                }
+            },
+            maxFormFields: 3
+        );
+
+        try {
+            $response = await(
+                Http::client()
+                    ->multipartWithFiles(
+                        data: [
+                            'field1' => 'v1',
+                            'field2' => 'v2',
+                            'field3' => 'v3',
+                            'field4' => 'v4',
+                        ],
+                        files: []
+                    )
+                    ->post($url)
+            );
+
+            expect($response->status())->toBe(400)
+                ->and($response->body())->toContain('Too many form fields in multipart body')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
 });

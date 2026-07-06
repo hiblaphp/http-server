@@ -27,6 +27,16 @@ class Request extends AbstractMessage
     public int $maxHeaderSize = 16384;
 
     /**
+     * @internal Inherited from the HTTP Server configuration
+     */
+    public int $maxUploadedFiles = 20;
+
+    /**
+     * @internal Inherited from the HTTP Server configuration
+     */
+    public int $maxFormFields = 1000;
+
+    /**
      * @param string $method
      * @param string $uri
      * @param array<string, string|list<string>> $headers
@@ -97,13 +107,30 @@ class Request extends AbstractMessage
             /** @var array<int, PromiseInterface<null>> $writePromises */
             $writePromises = [];
 
-            $parser->on('field', function (mixed $name, mixed $value) use ($form) {
+            $fileCount = 0;
+            $fieldCount = 0;
+            $maxFiles = $this->maxUploadedFiles;
+            $maxFields = $this->maxFormFields;
+
+            $parser->on('field', function (mixed $name, mixed $value) use ($form, &$fieldCount, $maxFields, $parser) {
+                if (++$fieldCount > $maxFields) {
+                    $parser->emit('error', [new MultipartException('Too many form fields in multipart body')]);
+
+                    return;
+                }
+
                 if (\is_string($name) && \is_string($value)) {
                     $form->addField($name, $value);
                 }
             });
 
-            $parser->on('file', function (mixed $name, mixed $filename, mixed $mime, mixed $fileStream) use ($form, &$writePromises) {
+            $parser->on('file', function (mixed $name, mixed $filename, mixed $mime, mixed $fileStream) use ($form, &$writePromises, &$fileCount, $maxFiles, $parser) {
+                if (++$fileCount > $maxFiles) {
+                    $parser->emit('error', [new MultipartException('Too many file uploads in multipart body')]);
+
+                    return;
+                }
+
                 if (! \is_string($name) || ! \is_string($filename) || ! \is_string($mime) || ! $fileStream instanceof ReadableStreamInterface) {
                     return;
                 }

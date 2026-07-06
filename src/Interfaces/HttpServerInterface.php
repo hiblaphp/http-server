@@ -184,6 +184,17 @@ interface HttpServerInterface
     public function withMaxConcurrentRequestsPerConnection(int $limit): static;
 
     /**
+     * Configure limits for parsing multipart/form-data requests.
+     * Prevents resource exhaustion from file-bombing or hash collision attacks.
+     *
+     * @param int $maxFiles Maximum number of file uploads allowed per request (Default: 20).
+     * @param int $maxFields Maximum number of regular form fields allowed per request (Default: 1000).
+     *
+     * @return static
+     */
+    public function withMultipartLimits(int $maxFiles, int $maxFields): static;
+
+    /**
      * Start the HTTP Server and block the current thread to process incoming requests.
      *
      * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler Callback invoked for each incoming request.

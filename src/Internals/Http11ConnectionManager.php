@@ -43,7 +43,9 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
         private readonly ?float $keepAliveTimeout = null,
-        private readonly int $maxConcurrentRequestsPerConnection = 128
+        private readonly int $maxConcurrentRequestsPerConnection = 128,
+        private readonly int $maxUploadedFiles = 20,
+        private readonly int $maxFormFields = 1000
     ) {
         $this->requestHandler = $requestHandler;
     }
@@ -58,7 +60,9 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
-            $this->keepAliveTimeout
+            $this->keepAliveTimeout,
+            $this->maxUploadedFiles,
+            $this->maxFormFields
         );
 
         $this->protocolHandler->onEarlyResponse = function (string $data) use ($connection): void {

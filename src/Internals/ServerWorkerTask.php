@@ -51,7 +51,9 @@ final class ServerWorkerTask
         private readonly ?float $keepAliveTimeout = null,
         private readonly mixed $onStartCallback = null,
         private readonly float $gracefulShutdownTimeout = 15.0,
-        private readonly int $maxConcurrentRequestsPerConnection = 128
+        private readonly int $maxConcurrentRequestsPerConnection = 128,
+        private readonly int $maxUploadedFiles = 20,
+        private readonly int $maxFormFields = 1000
     ) {
     }
 
@@ -80,7 +82,9 @@ final class ServerWorkerTask
             $this->maxHeaderCount,
             $this->headerTimeout,
             $this->keepAliveTimeout,
-            $this->maxConcurrentRequestsPerConnection
+            $this->maxConcurrentRequestsPerConnection,
+            $this->maxUploadedFiles,
+            $this->maxFormFields
         );
 
         $gracefulShutdownTimeout = $this->gracefulShutdownTimeout;

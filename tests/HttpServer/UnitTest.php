@@ -203,4 +203,12 @@ describe('HttpServer Configuration & Instantiation', function () {
     it('throws an exception if maximum concurrent requests per connection is less than 1', function () {
         HttpServer::create()->withMaxConcurrentRequestsPerConnection(0);
     })->throws(InvalidConfigurationException::class, 'Concurrent requests limit must be at least 1.');
+
+    it('can configure multipart limits', function () {
+        $server = HttpServer::create()->withMultipartLimits(50, 500);
+
+        expect(getServerProperty($server, 'maxUploadedFiles'))->toBe(50)
+            ->and(getServerProperty($server, 'maxFormFields'))->toBe(500)
+        ;
+    });
 });
