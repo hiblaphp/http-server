@@ -17,7 +17,9 @@ abstract class AbstractMessage
     public array $headers = [];
 
     /**
-     * @var string|ReadableStreamInterface The message body payload
+     * @var string|ReadableStreamInterface The message body payload.
+     *      For incoming Requests from the server, this is always a ReadableStreamInterface.
+     *      For outgoing Responses, this is typically a string, but can be a stream.
      */
     public string|ReadableStreamInterface $body = '';
 
