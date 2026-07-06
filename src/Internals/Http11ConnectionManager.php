@@ -9,7 +9,6 @@ use Hibla\HttpServer\Exceptions\InvalidResponseException;
 use Hibla\HttpServer\Interfaces\ConnectionManagerInterface;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Socket\Interfaces\ConnectionInterface;
@@ -136,7 +135,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
                     // SAFETY NET: If the user responded without fully consuming the incoming stream,
                     // Immidiately close the TCP connection to prevent HTTP request smuggling / desync.
-                    if ($body instanceof RequestBodyStream) {
+                    if ($body instanceof \Hibla\HttpServer\Message\RequestBodyStream) {
                         if ($body->isReadable() && ! $body->hasDataListener()) {
                             $response->setHeader('Connection', 'close');
                             $body->close();

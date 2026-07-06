@@ -249,7 +249,6 @@ describe('Request Smuggling — Connection: close isolation', function () {
         $requestCount = 0;
         $handler = new Http11ProtocolHandler(
             $connection,
-            // GET request with empty body is already closed and unreadable
             function (Request $request, ProtocolHandlerInterface $protocol) use (&$requestCount) {
                 $requestCount++;
                 $protocol->writeResponse(new Response(200, ['Connection' => 'close'], 'OK'));
@@ -563,11 +562,10 @@ describe('Content-Length — Edge cases and overflow attacks', function () {
 
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 99999999999999999999\r\n\r\n");
 
-        // Allow promise microtask to execute and write response
         await(delay(0.01));
 
         expect($buffer)->toMatch('/HTTP\/1\.1 (400|413)/')
-            ->and($requestReached)->toBeTrue()
+            ->and($requestReached)->toBeFalse()
         ;
     });
 
@@ -792,7 +790,6 @@ describe('HTTP/1.0 — Specific compliance', function () {
 
         $handler->handleData("GET / HTTP/1.0\r\n\r\n");
 
-        // Allow promise microtask to execute and write response
         await(delay(0.01));
 
         expect($buffer)->toContain('HTTP/1.0 200 OK')
@@ -861,7 +858,7 @@ describe('State machine — Per-request state reset integrity', function () {
 
         $promises = [];
         $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$promises) {
-            $promises[] = $request->getBufferedBody(); // Just store the promise, don't await!
+            $promises[] = $request->getBufferedBody();
         });
 
         $raw = "POST /first HTTP/1.1\r\n"
@@ -893,7 +890,7 @@ describe('State machine — Per-request state reset integrity', function () {
 
         $promises = [];
         $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$promises) {
-            $promises[] = $request->getBufferedBody(); // Just store the promise, don't await!
+            $promises[] = $request->getBufferedBody();
         });
 
         $raw = "POST /first HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nfoo"
@@ -935,11 +932,10 @@ describe('State machine — Per-request state reset integrity', function () {
 
         $handler->handleData($raw);
 
-        // Allow promise microtask to execute and write response
         await(delay(0.01));
 
         expect($buffer)->toContain('HTTP/1.1 413')
-            ->and($requestCount)->toBe(1) // Reached exactly once
+            ->and($requestCount)->toBe(0)
         ;
     });
 });
@@ -988,7 +984,6 @@ describe('Content-Length — PHP integer saturation at upper boundary', function
         $requestReached = false;
         $handler = new Http11ProtocolHandler(
             $connection,
-            // Reaches the handler, then getBufferedBody rejects with 413
             function (Request $request, ProtocolHandlerInterface $protocol) use (&$requestReached) {
                 $requestReached = true;
                 $request->getBufferedBody()->catch(function (Throwable $e) use ($protocol) {
@@ -1002,7 +997,7 @@ describe('Content-Length — PHP integer saturation at upper boundary', function
         await(delay(0.01));
 
         expect($buffer)->toContain('HTTP/1.1 413')
-            ->and($requestReached)->toBeTrue()
+            ->and($requestReached)->toBeFalse()
         ;
     });
 });

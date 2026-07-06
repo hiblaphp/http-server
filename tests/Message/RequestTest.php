@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\MalformedMultipartException;
+use Hibla\HttpServer\Exceptions\MessageParsingException;
+use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Message\MultipartForm;
 use Hibla\HttpServer\Message\Request;
+use Hibla\Promise\Exceptions\CancelledException;
 use Hibla\Stream\Interfaces\PromiseReadableStreamInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
 use Hibla\Stream\ThroughStream;
@@ -436,5 +439,108 @@ it('closes the parent request body and cancels all nested readAllAsync operation
         ->and($bodyStream->isReadable())->toBeFalse()
         ->and($caughtException)->toBeInstanceOf(RuntimeException::class)
         ->and($caughtException->getMessage())->toBe('Stream closed')
+    ;
+});
+
+it('buffers the request body stream into a string successfully', function () {
+    $bodyStream = new ThroughStream();
+    $request = new Request('POST', '/', [], $bodyStream);
+
+    Loop::addTimer(0.01, function () use ($bodyStream) {
+        $bodyStream->write('part_1');
+        $bodyStream->write('_part_2');
+        $bodyStream->end();
+    });
+
+    $body = await($request->getBufferedBody());
+    expect($body)->toBe('part_1_part_2');
+
+    $cachedBody = await($request->getBufferedBody());
+    expect($cachedBody)->toBe('part_1_part_2');
+});
+
+it('buffers the request body and decodes it as JSON', function () {
+    $bodyStream = new ThroughStream();
+    $request = new Request('POST', '/', [], $bodyStream);
+
+    Loop::addTimer(0.01, function () use ($bodyStream) {
+        $bodyStream->write('{"app": "Hibla", "status"');
+        $bodyStream->write(': "active"}');
+        $bodyStream->end();
+    });
+
+    $json = await($request->getJson());
+    expect($json)->toBe([
+        'app' => 'Hibla',
+        'status' => 'active',
+    ]);
+});
+
+it('throws MessageParsingException on invalid JSON payloads', function () {
+    $bodyStream = new ThroughStream();
+    $request = new Request('POST', '/', [], $bodyStream);
+
+    Loop::addTimer(0.01, function () use ($bodyStream) {
+        $bodyStream->write('{invalid_json}');
+        $bodyStream->end();
+    });
+
+    expect(fn () => await($request->getJson()))
+        ->toThrow(MessageParsingException::class, 'Invalid JSON payload')
+    ;
+});
+
+it('enforces size limits and shuts down the stream on PayloadTooLargeException', function () {
+    $bodyStream = new ThroughStream();
+    $request = new Request('POST', '/', [], $bodyStream);
+
+    $dataEvents = 0;
+    $bodyStream->on('data', function () use (&$dataEvents) {
+        $dataEvents++;
+    });
+
+    Loop::addTimer(0.01, function () use ($bodyStream) {
+        $bodyStream->write('12345');
+    });
+
+    Loop::addTimer(0.02, function () use ($bodyStream) {
+        $bodyStream->write('6');
+    });
+
+    Loop::addTimer(0.03, function () use ($bodyStream) {
+        $bodyStream->write('7890');
+    });
+
+    expect(fn () => await($request->getBufferedBody(5)))
+        ->toThrow(PayloadTooLargeException::class, 'Content Too Large')
+    ;
+
+    expect($bodyStream->isReadable())->toBeFalse();
+
+    expect($dataEvents)->toBe(2);
+});
+
+it('cleans up stream listeners, closes the stream, and discards future bytes on cancellation', function () {
+    $bodyStream = new ThroughStream();
+    $request = new Request('POST', '/', [], $bodyStream);
+
+    $promise = $request->getBufferedBody();
+
+    $bodyStream->write('hello');
+
+    await(delay(0.01));
+
+    $promise->cancel();
+
+    await(delay(0.01));
+
+    $bodyStream->write(' world');
+
+    expect($promise->isCancelled())->toBeTrue();
+
+    expect($bodyStream->isReadable())->toBeFalse();
+
+    expect(fn () => await($promise))
+        ->toThrow(CancelledException::class)
     ;
 });
