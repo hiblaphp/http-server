@@ -7,6 +7,8 @@ use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 
+use function Hibla\await;
+
 describe('TE obfuscation via casing — TE.TE bypass prevention', function () {
 
     it('normalizes Transfer-Encoding: Chunked (capital C) and parses the body correctly', function () {
@@ -24,7 +26,7 @@ describe('TE obfuscation via casing — TE.TE bypass prevention', function () {
         );
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -43,7 +45,7 @@ describe('TE obfuscation via casing — TE.TE bypass prevention', function () {
         );
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -92,7 +94,7 @@ describe('Multi-header Transfer-Encoding chain termination — TE.TE desync prev
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -113,7 +115,7 @@ describe('Multi-header Transfer-Encoding chain termination — TE.TE desync prev
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -133,7 +135,7 @@ describe('Content-Length desync vectors', function () {
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 05\r\n\r\nhello");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 

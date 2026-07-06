@@ -71,24 +71,13 @@ interface HttpServerInterface
     /**
      * Configure the maximum allowed request body size for buffered requests.
      *
-     * Requests exceeding this size will be rejected with a 413 Payload Too Large.
+     * Requests exceeding this size will be rejected with a 413 Content Too Large.
      *
      * @param int $bytes Max size in bytes.
      *
      * @return static A new instance with the limit configured.
      */
     public function withMaxBodySize(int $bytes): static;
-
-    /**
-     * Configure the server to deliver streaming request bodies instead of buffering them.
-     *
-     * When enabled, $request->getBody() returns a ReadableStreamInterface.
-     *
-     * @param bool $enable True to enable request streaming, false to buffer.
-     *
-     * @return static A new instance with streaming configured.
-     */
-    public function withStreamingRequests(bool $enable = true): static;
 
     /**
      * Set the maximum number of concurrent connections allowed per worker process.

@@ -6,7 +6,9 @@ namespace Hibla\HttpServer\Message;
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\MalformedMultipartException;
+use Hibla\HttpServer\Exceptions\MessageParsingException;
 use Hibla\HttpServer\Exceptions\MultipartException;
+use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
@@ -24,6 +26,11 @@ class Request extends AbstractMessage
     /**
      * @internal Inherited from the HTTP Server configuration
      */
+    public int $maxBodySize = 10485760;
+
+    /**
+     * @internal Inherited from the HTTP Server configuration
+     */
     public int $maxHeaderSize = 16384;
 
     /**
@@ -35,6 +42,11 @@ class Request extends AbstractMessage
      * @internal Inherited from the HTTP Server configuration
      */
     public int $maxFormFields = 1000;
+
+    /**
+     * Used to memoize the buffered body so multiple calls don't exhaust the stream.
+     */
+    private ?string $cachedBody = null;
 
     /**
      * @param string $method
@@ -81,6 +93,125 @@ class Request extends AbstractMessage
     public function getServerParams(): array
     {
         return $this->serverParams;
+    }
+
+    /**
+     * Asynchronously buffers the request body stream into memory and returns it as a string.
+     *
+     * @param int|null $maxBytes Optional override for the maximum allowed body size.
+     *
+     * @return PromiseInterface<string>
+     */
+    public function getBufferedBody(?int $maxBytes = null): PromiseInterface
+    {
+        if ($this->cachedBody !== null) {
+            return Promise::resolved($this->cachedBody);
+        }
+
+        $body = $this->getBody();
+        if (\is_string($body)) {
+            $this->cachedBody = $body;
+
+            return Promise::resolved($body);
+        }
+
+        $limit = $maxBytes ?? $this->maxBodySize;
+
+        $contentLength = $this->getHeaderLine('Content-Length');
+
+        if ($contentLength !== '' && ctype_digit($contentLength)) {
+            if ((int) $contentLength > $limit) {
+                $body->close();
+
+                return Promise::rejected(new PayloadTooLargeException('Content Too Large: Exceeded ' . $limit . ' bytes.'));
+            }
+        }
+
+        if (! $body->isReadable()) {
+            $this->cachedBody = '';
+
+            return Promise::resolved('');
+        }
+
+        /** @var Promise<string> */
+        return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($body, $limit) {
+            $buffer = '';
+
+            /** @var (\Closure(string): void)|null $dataListener */
+            $dataListener = null;
+            /** @var (\Closure(): void)|null $endListener */
+            $endListener = null;
+            /** @var (\Closure(\Throwable): void)|null $errorListener */
+            $errorListener = null;
+
+            $cleanup = function () use ($body, &$dataListener, &$endListener, &$errorListener) {
+                if ($dataListener !== null) {
+                    $body->removeListener('data', $dataListener);
+                }
+                if ($endListener !== null) {
+                    $body->removeListener('end', $endListener);
+                }
+                if ($errorListener !== null) {
+                    $body->removeListener('error', $errorListener);
+                }
+            };
+
+            $dataListener = function (string $chunk) use (&$buffer, $limit, $body, $reject, $cleanup) {
+                $buffer .= $chunk;
+                if (\strlen($buffer) > $limit) {
+                    $cleanup();
+                    $body->close();
+                    $reject(new PayloadTooLargeException('Content Too Large: Exceeded ' . $limit . ' bytes.'));
+                }
+            };
+
+            $endListener = function () use (&$buffer, $resolve, $cleanup) {
+                $cleanup();
+                $this->cachedBody = $buffer;
+                $resolve($buffer);
+            };
+
+            $errorListener = function (\Throwable $e) use ($reject, $cleanup) {
+                $cleanup();
+                $reject($e);
+            };
+
+            $onCancel(function () use ($cleanup, $body) {
+                $cleanup();
+                $body->close();
+            });
+
+            $body->on('data', $dataListener);
+            $body->on('end', $endListener);
+            $body->on('error', $errorListener);
+
+            $body->resume();
+        });
+    }
+
+    /**
+     * Asynchronously buffers the request body and decodes it as JSON.
+     *
+     * @param int|null $maxBytes Optional override for the maximum allowed body size.
+     *
+     * @return PromiseInterface<mixed>
+     */
+    public function getJson(?int $maxBytes = null): PromiseInterface
+    {
+        $promise = $this->getBufferedBody($maxBytes)->then(function (string $body) {
+            if ($body === '') {
+                return null;
+            }
+
+            $decoded = json_decode($body, true);
+            if (json_last_error() !== \JSON_ERROR_NONE) {
+                throw new MessageParsingException('Invalid JSON payload: ' . json_last_error_msg());
+            }
+
+            return $decoded;
+        });
+
+        return Promise::propagateCancellation($promise);
     }
 
     /**

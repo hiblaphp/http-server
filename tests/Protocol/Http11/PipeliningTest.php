@@ -43,7 +43,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $onData(
             "GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n" .
-            "GET /fast HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                "GET /fast HTTP/1.1\r\nHost: localhost\r\n\r\n"
         );
 
         await(delay(0.06));
@@ -90,8 +90,8 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $onData(
             "GET /req1 HTTP/1.1\r\nHost: localhost\r\n\r\n" .
-            "GET /req2 HTTP/1.1\r\nHost: localhost\r\n\r\n" .
-            "GET /req3 HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                "GET /req2 HTTP/1.1\r\nHost: localhost\r\n\r\n" .
+                "GET /req3 HTTP/1.1\r\nHost: localhost\r\n\r\n"
         );
 
         await(delay(0.01));
@@ -109,11 +109,11 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
         expect($resumeCount)->toBe(1);
     });
 
-    it('retains correct sequencing and recovers even if a pipelined request throws an error', function () {
+    it('aborts the pipeline and closes the connection if a request throws an exception to prevent desync', function () {
         $buffer = '';
         $onData = null;
 
-        $connection = mockConnection($buffer, onData: $onData);
+        $connection = mockConnection($buffer, expectClose: true, onData: $onData);
 
         $manager = new Http11ConnectionManager(
             function (Request $request) {
@@ -131,19 +131,15 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $onData(
             "GET /error HTTP/1.1\r\nHost: localhost\r\n\r\n" .
-            "GET /clean HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                "GET /clean HTTP/1.1\r\nHost: localhost\r\n\r\n"
         );
 
         await(delay(0.02));
 
         expect($buffer)->toContain('500 Internal Server Error')
-            ->and($buffer)->toContain('Clean Response')
+            ->and($buffer)->toContain('Connection: close')
+            ->and($buffer)->not->toContain('Clean Response')
         ;
-
-        $errPos = strpos($buffer, '500 Internal Server Error');
-        $cleanPos = strpos($buffer, 'Clean Response');
-
-        expect($errPos)->toBeLessThan($cleanPos);
     });
 
     it('halts pipelined execution immediately if a request triggers a protocol upgrade (101)', function () {
@@ -174,7 +170,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $onData(
             "GET /normal HTTP/1.1\r\nHost: localhost\r\n\r\n" .
-            "GET /upgrade HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+                "GET /upgrade HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
         );
 
         await(delay(0.01));
@@ -213,7 +209,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $onData(
             "GET /hanging HTTP/1.1\r\nHost: localhost\r\n\r\n" .
-            "GET /clean HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                "GET /clean HTTP/1.1\r\nHost: localhost\r\n\r\n"
         );
 
         await(delay(0.01));

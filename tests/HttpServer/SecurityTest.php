@@ -39,7 +39,7 @@ describe('Server Security Limits', function () {
         }
     });
 
-    it('rejects requests exceeding maxBodySize with a 413 Payload Too Large', function () {
+    it('rejects requests exceeding maxBodySize with a 413 Content Too Large', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return ServerResponse::plaintext('This should not be reached');
         }, maxBodySize: 1024);

@@ -232,7 +232,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             $request->getBody()->on('close', fn () => $GLOBALS['resolveClose'](true));
-        }, streamingRequests: true);
+        });
 
         try {
             $rawClient = new Connector();

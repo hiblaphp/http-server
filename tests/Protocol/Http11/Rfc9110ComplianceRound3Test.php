@@ -27,7 +27,7 @@ describe('RFC 9112 section 7.1 — Strict Chunk Size Parsing', function () {
         $handler->handleData($raw);
 
         expect($buffer)->toContain('HTTP/1.1 400 Bad Request')
-            ->and($requestReached)->toBeFalse()
+            ->and($requestReached)->toBeTrue()
         ;
     });
 

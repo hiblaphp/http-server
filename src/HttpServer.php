@@ -68,11 +68,6 @@ final class HttpServer implements HttpServerInterface
     private int $maxBodySize = 10485760;
 
     /**
-     * @var bool True to expose request body as stream instead of buffered string
-     */
-    private bool $streamingRequests = false;
-
-    /**
      * @var int Maximum total header block size in bytes (Default: 16384)
      */
     private int $maxHeaderSize = 16384;
@@ -252,17 +247,6 @@ final class HttpServer implements HttpServerInterface
     /**
      * {@inheritdoc}
      */
-    public function withStreamingRequests(bool $enable = true): static
-    {
-        $clone = clone $this;
-        $clone->streamingRequests = $enable;
-
-        return $clone;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
     public function withHeaderLimits(int $maxSize, int $maxCount): static
     {
         $clone = clone $this;
@@ -384,7 +368,6 @@ final class HttpServer implements HttpServerInterface
             $this->customSocketServer,
             $requestHandler,
             $this->maxBodySize,
-            $this->streamingRequests,
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
@@ -433,7 +416,6 @@ final class HttpServer implements HttpServerInterface
             $socket,
             $requestHandler,
             $this->maxBodySize,
-            $this->streamingRequests,
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
@@ -475,7 +457,6 @@ final class HttpServer implements HttpServerInterface
             $context,
             $requestHandler,
             $this->maxBodySize,
-            $this->streamingRequests,
             $this->connectionLimit,
             $this->pauseOnLimit,
             $this->maxHeaderSize,
@@ -627,7 +608,6 @@ final class HttpServer implements HttpServerInterface
         ServerInterface $socket,
         callable $requestHandler,
         int $maxBodySize = 10485760,
-        bool $streamingRequests = false,
         int $maxHeaderSize = 8192,
         int $maxHeaderCount = 100,
         ?float $headerTimeout = null,
@@ -642,7 +622,6 @@ final class HttpServer implements HttpServerInterface
         $socket->on('connection', static function (ConnectionInterface $connection) use (
             $requestHandler,
             $maxBodySize,
-            $streamingRequests,
             $maxHeaderSize,
             $maxHeaderCount,
             $headerTimeout,
@@ -656,7 +635,6 @@ final class HttpServer implements HttpServerInterface
             $manager = new Http11ConnectionManager(
                 $requestHandler,
                 $maxBodySize,
-                $streamingRequests,
                 $maxHeaderSize,
                 $maxHeaderCount,
                 $headerTimeout,

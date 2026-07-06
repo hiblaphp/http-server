@@ -84,6 +84,14 @@ class RequestBodyStream extends EventEmitter implements ReadableStreamInterface
     }
 
     /**
+     * Checks if a data listener has been attached to the stream.
+     */
+    public function hasDataListener(): bool
+    {
+        return $this->hasDataListener;
+    }
+
+    /**
      * {@inheritDoc}
      *
      * Overridden to detect when the application starts listening for data.

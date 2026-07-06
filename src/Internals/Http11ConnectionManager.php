@@ -12,6 +12,7 @@ use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Socket\Interfaces\ConnectionInterface;
+use Hibla\Stream\Interfaces\ReadableStreamInterface;
 
 /**
  * @internal
@@ -38,7 +39,6 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
     public function __construct(
         callable $requestHandler,
         private readonly int $maxBodySize = 10485760,
-        private readonly bool $streamingRequests = false,
         private readonly int $maxHeaderSize = 8192,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
@@ -56,7 +56,6 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             $connection,
             $this->onRequest(...),
             $this->maxBodySize,
-            $this->streamingRequests,
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
@@ -132,11 +131,26 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
                 } elseif (! $response instanceof Response) {
                     throw new InvalidResponseException('Request handler must return an instance of Response');
                 } else {
+                    $body = $request->getBody();
+
+                    // SAFETY NET: If the user responded without fully consuming the incoming stream,
+                    // Immidiately close the TCP connection to prevent HTTP request smuggling / desync.
+                    if ($body instanceof \Hibla\HttpServer\Message\RequestBodyStream) {
+                        if ($body->isReadable() && ! $body->hasDataListener()) {
+                            $response->setHeader('Connection', 'close');
+                            $body->close();
+                        }
+                    } elseif ($body instanceof ReadableStreamInterface && $body->isReadable()) {
+                        $response->setHeader('Connection', 'close');
+                        $body->close();
+                    }
+
                     $item->response = $response;
                 }
             } catch (\Throwable $e) {
                 if (! $protocol->isUpgraded()) {
                     $item->response = Response::plaintext("500 Internal Server Error\n" . $e->getMessage(), 500);
+                    $item->response->setHeader('Connection', 'close');
                 } else {
                     $item->response = null;
                 }

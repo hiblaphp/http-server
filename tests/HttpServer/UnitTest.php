@@ -145,14 +145,6 @@ describe('HttpServer Configuration & Instantiation', function () {
         expect(getServerProperty($server, 'maxBodySize'))->toBe(5000000);
     });
 
-    it('can toggle streaming requests', function () {
-        $server = HttpServer::create()->withStreamingRequests(true);
-        expect(getServerProperty($server, 'streamingRequests'))->toBeTrue();
-
-        $server2 = $server->withStreamingRequests(false);
-        expect(getServerProperty($server2, 'streamingRequests'))->toBeFalse();
-    });
-
     it('can configure header limits for size and count', function () {
         $server = HttpServer::create()->withHeaderLimits(16384, 150);
 
