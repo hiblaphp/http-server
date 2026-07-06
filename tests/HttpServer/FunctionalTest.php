@@ -42,7 +42,7 @@ describe('Core HTTP Functionality', function () {
 
     it('handles a real POST request with a JSON payload', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $data = json_decode((string) $request->getBody(), true);
+            $data = await($request->getJson());
 
             return ServerResponse::json(['received_name' => $data['name']]);
         });
@@ -207,7 +207,7 @@ describe('Browser-Like Simulation', function () {
     it('submits multipart form data including file uploads', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             $contentType = $request->getHeaderLine('Content-Type');
-            $body = (string) $request->getBody();
+            $body = await($request->getBufferedBody());
 
             if (str_contains($contentType, 'multipart/form-data') && str_contains($body, 'dummy_file_content')) {
                 return ServerResponse::plaintext('Upload successful');
@@ -279,7 +279,7 @@ describe('Browser-Like Simulation', function () {
             $reqBody->pipe($resBody);
 
             return new ServerResponse(200, [], $resBody);
-        }, maxBodySize: 10485760, streamingRequests: true);
+        }, maxBodySize: 10485760);
 
         try {
             $rawClient = new Connector();
@@ -333,7 +333,7 @@ describe('Advanced Client-Server Interactions', function () {
             $totalBytes = await($uploadPromise);
 
             return ServerResponse::plaintext("Fully streamed {$totalBytes} bytes");
-        }, maxBodySize: 10485760, streamingRequests: true);
+        }, maxBodySize: 10485760);
 
         try {
             $payload = str_repeat('X', 1024 * 1024);
@@ -466,7 +466,7 @@ describe('Advanced Client-Server Interactions', function () {
             $reqBody->pipe($resBody);
 
             return new ServerResponse(200, [], $resBody);
-        }, maxBodySize: 10485760, streamingRequests: true);
+        }, maxBodySize: 10485760);
 
         try {
             $rawClient = new Connector();
@@ -544,7 +544,7 @@ describe('Advanced Client-Server Interactions', function () {
             $reqBody->pipe($uppercaseStream);
 
             return new ServerResponse(200, [], $uppercaseStream);
-        }, streamingRequests: true);
+        });
 
         try {
             $rawClient = new Connector();
@@ -916,7 +916,7 @@ describe('Advanced Client-Server Interactions', function () {
             } catch (Throwable $e) {
                 return new ServerResponse(500, [], $e->getMessage());
             }
-        }, streamingRequests: true);
+        });
 
         $localClientFile = tempnam(sys_get_temp_dir(), 'client_side_');
         $filePayload = 'S3-Direct-Streaming-Multipart-Payload-Data-Check-123';
@@ -982,7 +982,7 @@ describe('Advanced Client-Server Interactions', function () {
             } catch (Throwable $e) {
                 return new ServerResponse(500, [], $e->getMessage());
             }
-        }, streamingRequests: true);
+        });
 
         $localClientFile = tempnam(sys_get_temp_dir(), 'client_side_');
         $filePayload = 'S3-Direct-Streaming-Multipart-Payload-Data-Check-123';
@@ -1039,7 +1039,7 @@ describe('Advanced Client-Server Interactions', function () {
             } catch (Throwable $e) {
                 return new ServerResponse(500, [], $e->getMessage());
             }
-        }, streamingRequests: true);
+        });
 
         $localClientFile = tempnam(sys_get_temp_dir(), 'client_side_');
         $filePayload = 'S3-Promise-Direct-Streaming-Multipart-Payload-123';

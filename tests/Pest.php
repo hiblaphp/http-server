@@ -169,7 +169,6 @@ function createCloseableMockConnection(string &$buffer): ConnectionInterface
 function createTestServer(
     callable $requestHandler,
     int $maxBodySize = 10485760,
-    bool $streamingRequests = false,
     int $maxHeaderSize = 8192,
     int $maxHeaderCount = 100,
     array $context = [],
@@ -186,7 +185,6 @@ function createTestServer(
         $socket,
         $requestHandler,
         $maxBodySize,
-        $streamingRequests,
         $maxHeaderSize,
         $maxHeaderCount,
         $headerTimeout,

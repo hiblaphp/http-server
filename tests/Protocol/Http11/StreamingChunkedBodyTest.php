@@ -18,7 +18,6 @@ describe('Streaming — Chunked partial read: basic delivery', function () {
             function (Request $request) use (&$parsedRequest) {
                 $parsedRequest = $request;
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -65,7 +64,6 @@ describe('Streaming — Chunked partial read: CRLF boundary split across TCP pac
                     $ended = true;
                 });
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -98,7 +96,6 @@ describe('Streaming — Chunked partial read: CRLF boundary split across TCP pac
                     $received .= $chunk;
                 });
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -130,7 +127,6 @@ describe('Streaming — Chunked partial read: CRLF boundary split across TCP pac
                     $ended = true;
                 });
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -163,7 +159,6 @@ describe('Streaming — Chunked partial read: multi-chunk sequencing', function 
             function (Request $request) use (&$parsedRequest) {
                 $parsedRequest = $request;
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -206,7 +201,6 @@ describe('Streaming — Chunked partial read: multi-chunk sequencing', function 
             function (Request $request) use (&$parsedRequest) {
                 $parsedRequest = $request;
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -248,7 +242,6 @@ describe('Streaming — Chunked partial read: end event integrity', function () 
             function (Request $request) use (&$parsedRequest) {
                 $parsedRequest = $request;
             },
-            streamingRequests: true
         );
 
         $handler->handleData(
@@ -279,7 +272,6 @@ describe('Streaming — Chunked partial read: end event integrity', function () 
             function (Request $request) use (&$parsedRequest) {
                 $parsedRequest = $request;
             },
-            streamingRequests: true
         );
 
         $handler->handleData(

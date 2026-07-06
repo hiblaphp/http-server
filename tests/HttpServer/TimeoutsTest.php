@@ -213,7 +213,7 @@ describe('Timeout Edge Cases', function () {
             });
 
             return await($deferred);
-        }, streamingRequests: true, headerTimeout: 0.4);
+        }, headerTimeout: 0.4);
 
         try {
             $rawClient = new Connector();

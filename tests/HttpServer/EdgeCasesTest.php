@@ -20,7 +20,7 @@ afterEach(function () {
 describe('Protocol Edge Cases', function () {
     it('seamlessly handles the Expect: 100-continue handshake', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('Body size: ' . strlen((string) $request->getBody()));
+            return ServerResponse::plaintext('Body size: ' . strlen(await($request->getBufferedBody())));
         });
 
         try {
@@ -192,7 +192,7 @@ describe('Protocol Edge Cases', function () {
 
     it('safely parses chunked bodies that contain chunk extensions', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext((string) $request->getBody());
+            return ServerResponse::plaintext(await($request->getBufferedBody()));
         });
 
         try {
@@ -292,7 +292,7 @@ describe('Protocol Edge Cases', function () {
 
     it('correctly reads and parses request bodies on GET requests', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext((string) $request->getBody());
+            return ServerResponse::plaintext(await($request->getBufferedBody()));
         });
 
         try {
@@ -408,7 +408,7 @@ describe('Protocol Edge Cases', function () {
             });
 
             return new ServerResponse(200);
-        }, streamingRequests: true);
+        });
 
         try {
             $rawClient = new Connector();

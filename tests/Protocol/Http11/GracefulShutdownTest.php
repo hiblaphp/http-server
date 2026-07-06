@@ -140,7 +140,13 @@ describe('Protocol-level Graceful Shutdown', function () {
         });
 
         $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
-            $protocol->writeResponse(Response::plaintext('Upload received'));
+            $request->getBody()->on('data', function (string $chunk) {
+                // attache dummy data event to let the stream consume the sunk otherwise this test will fail
+            });
+
+            $request->getBody()->on('end', function () use ($protocol) {
+                $protocol->writeResponse(Response::plaintext('Upload received'));
+            });
         });
 
         $handler->handleData("POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");

@@ -227,7 +227,7 @@ describe('Server Configuration Integration Tests', function () {
                 fwrite($fp, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n0123456789");
 
                 $response = stream_get_contents($fp);
-                expect($response)->toContain('413 Payload Too Large');
+                expect($response)->toContain('413 Content Too Large');
             }
         );
     });
@@ -322,12 +322,11 @@ describe('Server Configuration Integration Tests', function () {
         );
     });
 
-    it('delivers request bodies as streams when enabled', function () {
+    it('always delivers request bodies as streams internally', function () {
         runConfigTest(
             function ($address) {
                 HttpServer::create($address)
                     ->withoutLogging()
-                    ->withStreamingRequests(true)
                     ->start(function (Request $request) {
                         $body = $request->getBody();
                         $isStream = $body instanceof ReadableStreamInterface;

@@ -8,6 +8,8 @@ use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 
+use function Hibla\await;
+
 describe('RFC 9112 section 2.2 — Message Parsing Robustness', function () {
 
     it('tolerates at least one leading CRLF before the request-line', function () {
@@ -230,7 +232,7 @@ describe('RFC 9112 section 6.2 — Content-Length', function () {
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 });
@@ -257,7 +259,7 @@ describe('RFC 9112 section 6.1 / section 6.3 — Transfer-Encoding and Content-L
 
         expect($parsedRequest)->not->toBeNull()
             ->and($parsedRequest->hasHeader('content-length'))->toBeFalse()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -279,7 +281,7 @@ describe('RFC 9112 section 6.1 / section 6.3 — Transfer-Encoding and Content-L
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 });
@@ -312,7 +314,7 @@ describe('RFC 9112 section 7.1.2 — Chunked Trailer Section', function () {
 
         expect($parsedRequests)->toHaveCount(2)
             ->and($parsedRequests[0]->getUri())->toBe('/first')
-            ->and($parsedRequests[0]->getBody())->toBe('hello')
+            ->and(await($parsedRequests[0]->getBufferedBody()))->toBe('hello')
             ->and($parsedRequests[1]->getUri())->toBe('/second')
             ->and($buffer)->not->toContain('400')
         ;
@@ -339,7 +341,7 @@ describe('RFC 9112 section 7.1.2 — Chunked Trailer Section', function () {
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
             ->and($buffer)->not->toContain('400')
         ;
     });

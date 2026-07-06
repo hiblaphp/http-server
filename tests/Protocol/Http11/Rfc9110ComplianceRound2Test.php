@@ -2,8 +2,13 @@
 
 declare(strict_types=1);
 
+use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
+
+use function Hibla\await;
+use function Hibla\delay;
 
 describe('RFC 9112 section 6.1/6.3 — Transfer-Encoding precedence beyond literal "chunked"', function () {
 
@@ -54,7 +59,6 @@ describe('RFC 9112 section 6.1/6.3 — Transfer-Encoding precedence beyond liter
             expect($buffer)->not->toContain('200');
         }
     });
-
 });
 
 describe('RFC 9112 section 6.3 / RFC 9110 section 8.6 — Content-Length value validation', function () {
@@ -90,7 +94,6 @@ describe('RFC 9112 section 6.3 / RFC 9110 section 8.6 — Content-Length value v
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 section 2.2 — Bare CR handling', function () {
@@ -110,7 +113,6 @@ describe('RFC 9112 section 2.2 — Bare CR handling', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 section 5.1 — malformed field-line grammar', function () {
@@ -130,7 +132,6 @@ describe('RFC 9112 section 5.1 — malformed field-line grammar', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 section 2.2 / section 3 — Header size enforcement must not depend on read fragmentation', function () {
@@ -153,7 +154,6 @@ describe('RFC 9112 section 2.2 / section 3 — Header size enforcement must not 
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 section 7.1 — chunk-size line has no size bound', function () {
@@ -175,20 +175,22 @@ describe('RFC 9112 section 7.1 — chunk-size line has no size bound', function 
 
         expect($buffer)->toContain('400');
     });
-
 });
 
 describe('Error-state continuation bug — chunked body exceeding maxBodySize', function () {
 
-    it('does not invoke the request handler after a 413 has already been sent mid-chunked-body', function () {
+    it('does not process further data and responds with 413 when chunked body exceeds maxBodySize mid-stream', function () {
         $buffer = '';
-        $connection = mockConnection($buffer);
+        $connection = mockConnection($buffer, expectClose: true);
 
         $requestCount = 0;
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () use (&$requestCount) {
+            function (Request $request, ProtocolHandlerInterface $protocol) use (&$requestCount) {
                 $requestCount++;
+                $request->getBufferedBody()->catch(function (Throwable $e) use ($protocol) {
+                    $protocol->writeResponse(new Response(413, ['Connection' => 'close'], 'Content Too Large'));
+                });
             },
             maxBodySize: 5
         );
@@ -203,9 +205,11 @@ describe('Error-state continuation bug — chunked body exceeding maxBodySize', 
 
         $handler->handleData($raw);
 
-        expect($buffer)->toContain('HTTP/1.1 413 Payload Too Large')
-            ->and($requestCount)->toBe(0)
+        await(delay(0.01));
+
+        expect($buffer)->toContain('HTTP/1.1 413')
+            ->and($buffer)->toContain('Content Too Large')
+            ->and($requestCount)->toBe(1)
         ;
     });
-
 });

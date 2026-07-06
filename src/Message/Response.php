@@ -49,7 +49,7 @@ class Response extends AbstractMessage
         410 => 'Gone',
         411 => 'Length Required',
         412 => 'Precondition Failed',
-        413 => 'Request Entity Too Large',
+        413 => 'Content Too Large',
         414 => 'Request-URI Too Large',
         415 => 'Unsupported Media Type',
         416 => 'Requested range not satisfiable',

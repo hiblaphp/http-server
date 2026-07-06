@@ -117,6 +117,22 @@ class Request extends AbstractMessage
 
         $limit = $maxBytes ?? $this->maxBodySize;
 
+        $contentLength = $this->getHeaderLine('Content-Length');
+
+        if ($contentLength !== '' && ctype_digit($contentLength)) {
+            if ((int) $contentLength > $limit) {
+                $body->close();
+
+                return Promise::rejected(new PayloadTooLargeException('Content Too Large: Exceeded ' . $limit . ' bytes.'));
+            }
+        }
+
+        if (! $body->isReadable()) {
+            $this->cachedBody = '';
+
+            return Promise::resolved('');
+        }
+
         /** @var Promise<string> */
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($body, $limit) {
             $buffer = '';
@@ -145,7 +161,7 @@ class Request extends AbstractMessage
                 if (\strlen($buffer) > $limit) {
                     $cleanup();
                     $body->close();
-                    $reject(new PayloadTooLargeException('Payload Too Large: Exceeded ' . $limit . ' bytes.'));
+                    $reject(new PayloadTooLargeException('Content Too Large: Exceeded ' . $limit . ' bytes.'));
                 }
             };
 

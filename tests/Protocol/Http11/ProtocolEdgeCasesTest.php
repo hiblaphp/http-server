@@ -7,6 +7,9 @@ use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 
+use function Hibla\await;
+use function Hibla\delay;
+
 describe('Zero-length request bodies', function () {
 
     it('dispatches a POST request immediately when Content-Length is 0 with an empty body', function () {
@@ -21,7 +24,7 @@ describe('Zero-length request bodies', function () {
         $handler->handleData("POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('')
         ;
     });
 
@@ -37,7 +40,7 @@ describe('Zero-length request bodies', function () {
         $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('')
         ;
     });
 
@@ -52,14 +55,13 @@ describe('Zero-length request bodies', function () {
 
         $handler->handleData(
             "POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
-            . "0\r\n\r\n"
+                . "0\r\n\r\n"
         );
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('')
         ;
     });
-
 });
 
 describe('STATE_UPGRADED guard — bytes after connection close are silently dropped', function () {
@@ -99,7 +101,6 @@ describe('STATE_UPGRADED guard — bytes after connection close are silently dro
 
         expect(substr_count($buffer, 'HTTP/1.1'))->toBe($responseCountBefore);
     });
-
 });
 
 describe('Body size boundary conditions', function () {
@@ -120,7 +121,7 @@ describe('Body size boundary conditions', function () {
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 8\r\n\r\n12345678");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('12345678')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('12345678')
         ;
     });
 
@@ -128,19 +129,22 @@ describe('Body size boundary conditions', function () {
         $buffer = '';
         $connection = mockConnection($buffer, expectClose: true);
 
-        $requestReached = false;
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () use (&$requestReached) {
-                $requestReached = true;
+            function (Request $request, ProtocolHandlerInterface $protocol) {
+                $request->getBufferedBody()->catch(function (Throwable $e) use ($protocol) {
+                    $protocol->writeResponse(new Response(413, ['Connection' => 'close'], 'Content Too Large'));
+                });
             },
             maxBodySize: 8
         );
 
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n123456789");
 
-        expect($buffer)->toContain('HTTP/1.1 413 Payload Too Large')
-            ->and($requestReached)->toBeFalse()
+        await(delay(0.01));
+
+        expect($buffer)->toContain('HTTP/1.1 413')
+            ->and($buffer)->toContain('Content Too Large')
         ;
     });
 
@@ -165,7 +169,7 @@ describe('Body size boundary conditions', function () {
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('abcdefgh')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('abcdefgh')
         ;
     });
 
@@ -173,11 +177,12 @@ describe('Body size boundary conditions', function () {
         $buffer = '';
         $connection = mockConnection($buffer, expectClose: true);
 
-        $requestReached = false;
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () use (&$requestReached) {
-                $requestReached = true;
+            function (Request $request, ProtocolHandlerInterface $protocol) {
+                $request->getBufferedBody()->catch(function (Throwable $e) use ($protocol) {
+                    $protocol->writeResponse(new Response(413, ['Connection' => 'close'], 'Content Too Large'));
+                });
             },
             maxBodySize: 8
         );
@@ -189,11 +194,12 @@ describe('Body size boundary conditions', function () {
 
         $handler->handleData($raw);
 
-        expect($buffer)->toContain('HTTP/1.1 413 Payload Too Large')
-            ->and($requestReached)->toBeFalse()
+        await(delay(0.01));
+
+        expect($buffer)->toContain('HTTP/1.1 413')
+            ->and($buffer)->toContain('Content Too Large')
         ;
     });
-
 });
 
 describe('Pipelined chunked requests — state machine reset between requests', function () {
@@ -216,9 +222,9 @@ describe('Pipelined chunked requests — state machine reset between requests', 
 
         expect($parsedRequests)->toHaveCount(2)
             ->and($parsedRequests[0]->getUri())->toBe('/first')
-            ->and($parsedRequests[0]->getBody())->toBe('abc')
+            ->and(await($parsedRequests[0]->getBufferedBody()))->toBe('abc')
             ->and($parsedRequests[1]->getUri())->toBe('/second')
-            ->and($parsedRequests[1]->getBody())->toBe('hello')
+            ->and(await($parsedRequests[1]->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -239,11 +245,10 @@ describe('Pipelined chunked requests — state machine reset between requests', 
         $handler->handleData($raw);
 
         expect($parsedRequests)->toHaveCount(2)
-            ->and($parsedRequests[0]->getBody())->toBe('1234567890')
-            ->and($parsedRequests[1]->getBody())->toBe('world')
+            ->and(await($parsedRequests[0]->getBufferedBody()))->toBe('1234567890')
+            ->and(await($parsedRequests[1]->getBufferedBody()))->toBe('world')
         ;
     });
-
 });
 
 describe('HTTP/1.0 edge cases', function () {
@@ -273,7 +278,9 @@ describe('HTTP/1.0 edge cases', function () {
             $connection,
             function (Request $request, ProtocolHandlerInterface $protocol) use (&$parsedRequest) {
                 $parsedRequest = $request;
-                $protocol->writeResponse(new Response(200, [], 'OK'));
+                $request->getBufferedBody()->then(function () use ($protocol) {
+                    $protocol->writeResponse(new Response(200, [], 'OK'));
+                });
             }
         );
 
@@ -283,12 +290,16 @@ describe('HTTP/1.0 edge cases', function () {
 
         $handler->handleData($raw);
 
-        expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+        expect($parsedRequest)->not->toBeNull();
+
+        $bodyVal = await($parsedRequest->getBufferedBody());
+
+        await(delay(0.01));
+
+        expect($bodyVal)->toBe('hello')
             ->and($buffer)->toContain('HTTP/1.0 200 OK')
         ;
     });
-
 });
 
 describe('Request-line edge cases', function () {
@@ -357,7 +368,6 @@ describe('Request-line edge cases', function () {
             ->and($parsedRequest->getMethod())->toBe('PURGE')
         ;
     });
-
 });
 
 describe('Header field edge cases', function () {
@@ -444,7 +454,6 @@ describe('Header field value whitespace — HTAB handling per RFC 9110 §5.5', f
             ->and($parsedRequest->getHeaderLine('x-custom'))->toBe('value')
         ;
     });
-
 });
 
 describe('Chunked trailer section — deliberate discard policy', function () {
@@ -466,7 +475,7 @@ describe('Chunked trailer section — deliberate discard policy', function () {
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
 
@@ -487,8 +496,52 @@ describe('Chunked trailer section — deliberate discard policy', function () {
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBe('hello')
+            ->and(await($parsedRequest->getBufferedBody()))->toBe('hello')
         ;
     });
+});
 
+describe('sendErrorAndClose() settle a pending getBufferedBody() promise', function () {
+
+    it('leaves the getBufferedBody() promise permanently settled when chunk-size pre-validation rejects the request', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $settled = false;
+        $resolvedValue = null;
+        $rejectedError = null;
+
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request, ProtocolHandlerInterface $protocol) use (&$settled, &$resolvedValue, &$rejectedError) {
+                $request->getBufferedBody()
+                    ->then(function ($body) use (&$settled, &$resolvedValue) {
+                        $settled = true;
+                        $resolvedValue = $body;
+                    })
+                    ->catch(function (Throwable $e) use (&$settled, &$rejectedError) {
+                        $settled = true;
+                        $rejectedError = $e;
+                    })
+                ;
+            },
+            maxBodySize: 16
+        );
+
+        $raw = "POST / HTTP/1.1\r\n"
+            . "Host: localhost\r\n"
+            . "Transfer-Encoding: chunked\r\n"
+            . "\r\n"
+            . "ff\r\n";
+
+        $handler->handleData($raw);
+
+        await(delay(0.05));
+
+        expect($buffer)->toContain('HTTP/1.1 413')
+            ->and($settled)->toBeTrue()
+            ->and($resolvedValue)->toBeNull()
+            ->and($rejectedError)->toBe($rejectedError)
+        ;
+    });
 });

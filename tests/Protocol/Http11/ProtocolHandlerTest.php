@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
+
+use function Hibla\await;
+use function Hibla\delay;
 
 it('parses a basic GET request with no body', function () {
     $buffer = '';
@@ -28,7 +32,7 @@ it('parses a basic GET request with no body', function () {
         ->and($parsedRequest->getUri())->toBe('/index.html?page=2')
         ->and($parsedRequest->getHeaderLine('host'))->toBe('localhost')
         ->and($parsedRequest->getProtocolVersion())->toBe('1.1')
-        ->and($parsedRequest->getBody())->toBe('')
+        ->and(await($parsedRequest->getBufferedBody()))->toBe('')
     ;
 });
 
@@ -46,12 +50,12 @@ it('successfully parses requests delivered across multiple TCP packets', functio
     expect($parsedRequest)->toBeNull();
 
     $handler->handleData("host\r\nContent-Length: 10\r\n\r\nhello");
-    expect($parsedRequest)->toBeNull();
+    expect($parsedRequest)->not->toBeNull();
 
     $handler->handleData('world');
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getBody())->toBe('helloworld')
+        ->and(await($parsedRequest->getBufferedBody()))->toBe('helloworld')
     ;
 });
 
@@ -77,7 +81,7 @@ it('parses chunked transfer encoding payloads correctly', function () {
     $handler->handleData($raw);
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getBody())->toBe('hello world')
+        ->and(await($parsedRequest->getBufferedBody()))->toBe('hello world')
     ;
 });
 
@@ -88,7 +92,6 @@ it('rejects and responds with a 431 status code if headers are too large', funct
     $handler = new Http11ProtocolHandler($connection, function () {
     });
 
-    // Uses 20000 bytes to comfortably exceed the default 16KB limit in the handler
     $handler->handleData(str_repeat('X', 20000));
 
     expect($writtenBuffer)->toContain('HTTP/1.1 431 Request Header Fields Too Large')
@@ -100,7 +103,10 @@ it('rejects and responds with a 413 status code if content-length exceeds max li
     $writtenBuffer = '';
     $connection = mockConnection($writtenBuffer);
 
-    $handler = new Http11ProtocolHandler($connection, function () {
+    $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
+        $request->getBufferedBody()->catch(function (Throwable $e) use ($protocol) {
+            $protocol->writeResponse(new Response(413, ['Connection' => 'close'], 'Content Too Large'));
+        });
     }, maxBodySize: 10);
 
     $raw = "POST /upload HTTP/1.1\r\n"
@@ -109,7 +115,11 @@ it('rejects and responds with a 413 status code if content-length exceeds max li
 
     $handler->handleData($raw);
 
-    expect($writtenBuffer)->toContain('HTTP/1.1 413 Payload Too Large');
+    await(delay(0.01));
+
+    expect($writtenBuffer)->toContain('HTTP/1.1 413')
+        ->and($writtenBuffer)->toContain('Content Too Large')
+    ;
 });
 
 it('yields unparsed trailing bytes when detached for websocket/protocol upgrades', function () {
@@ -168,7 +178,7 @@ it('handles pipelined requests sequentially in a single TCP stream payload', fun
         ->and($parsedRequests[0]->getUri())->toBe('/first-page')
         ->and($parsedRequests[1]->getMethod())->toBe('POST')
         ->and($parsedRequests[1]->getUri())->toBe('/second-page')
-        ->and($parsedRequests[1]->getBody())->toBe('body')
+        ->and(await($parsedRequests[1]->getBufferedBody()))->toBe('body')
     ;
 });
 
@@ -181,7 +191,7 @@ it('triggers onRequest immediately when streamingRequests is enabled, then pipes
     $parsedRequest = null;
     $handler = new Http11ProtocolHandler($connection, function (Request $request) use (&$parsedRequest) {
         $parsedRequest = $request;
-    }, streamingRequests: true);
+    });
 
     $handler->handleData("POST /stream-endpoint HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
 
@@ -221,7 +231,7 @@ it('correctly trims and ignores chunk extensions inside chunked payloads', funct
     $handler->handleData($raw);
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getBody())->toBe('chunk')
+        ->and(await($parsedRequest->getBufferedBody()))->toBe('chunk')
     ;
 });
 
@@ -257,12 +267,12 @@ it('automatically sends a 100 Continue response when the Expect header is presen
     $handler->handleData($rawHeaders);
 
     expect($writtenBuffer)->toBe("HTTP/1.1 100 Continue\r\n\r\n")
-        ->and($parsedRequest)->toBeNull()
+        ->and($parsedRequest)->not->toBeNull()
     ;
 
     $handler->handleData('hello world');
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getBody())->toBe('hello world')
+        ->and(await($parsedRequest->getBufferedBody()))->toBe('hello world')
     ;
 });

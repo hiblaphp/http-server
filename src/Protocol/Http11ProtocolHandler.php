@@ -136,6 +136,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private int $bufferOffset = 0;
 
+    private int $chunkedBytesDeclared = 0;
+
     private ?Request $currentRequest = null;
 
     private ?RequestBodyStream $bodyStream = null;
@@ -426,7 +428,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $this->parseHeaders($rawHeaders);
             $this->cancelHeaderTimer(); // Headers successfully received
         } catch (PayloadTooLargeException) {
-            $this->sendErrorAndClose(413, 'Payload Too Large');
+            $this->sendErrorAndClose(413, 'Content Too Large');
 
             return false;
         } catch (RequestHeaderFieldsTooLargeException) {
@@ -554,9 +556,15 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return $this->parseChunkTrailerPhase();
         }
 
-        // We ONLY enforce MAX_STREAMING_CHUNK_SIZE now as a memory safety bound against malicious chunk headers
         if ($this->currentChunkSize > self::MAX_STREAMING_CHUNK_SIZE) {
-            $this->sendErrorAndClose(413, 'Payload Too Large');
+            $this->sendErrorAndClose(413, 'Content Too Large');
+
+            return false;
+        }
+
+        $this->chunkedBytesDeclared += $this->currentChunkSize;
+        if ($this->chunkedBytesDeclared > $this->maxBodySize) {
+            $this->sendErrorAndClose(413, 'Content Too Large');
 
             return false;
         }
@@ -991,7 +999,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $drainListener = $body->resume(...);
         $this->connection->on('drain', $drainListener);
 
-        // Declare variables for stream listeners to allow their removal
         /** @var (\Closure(string): void)|null $dataListener */
         $dataListener = null;
         /** @var (\Closure(): void)|null $endListener */
@@ -1001,7 +1008,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         /** @var (\Closure(): void)|null $closeListener */
         $closeListener = null;
 
-        // Cleanup helper to fully detach the stream from the connection and prevent GC ghost events
         $cleanupListeners = function () use (
             $body,
             $connectionCloseListener,
@@ -1009,7 +1015,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             &$dataListener,
             &$endListener,
             &$errorListener,
-            &$closeListener
+            &$closeListener,
         ): void {
             $this->connection->removeListener('close', $connectionCloseListener);
             $this->connection->removeListener('drain', $drainListener);
@@ -1104,11 +1110,26 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bytesRead = 0;
         $this->currentChunkSize = 0;
         $this->chunkBytesRead = 0;
+        $this->chunkedBytesDeclared = 0;
+
+        // SAFETY NET: If a graceful shutdown was requested, and there are no active requests
+        // pending a response, it is safe to close the connection now that the body is finished.
+        if ($this->willCloseConnection && $this->activeRequestsCount === 0 && $this->state === self::STATE_HEADERS) {
+            $this->cancelAllTimers();
+            $this->connection->close();
+            $this->state = self::STATE_UPGRADED;
+        }
     }
 
     private function sendErrorAndClose(int $statusCode, string $reason): void
     {
         $this->cancelAllTimers();
+
+        if ($this->bodyStream !== null && $this->bodyStream->isReadable()) {
+            $this->bodyStream->emit('error', [new PayloadTooLargeException($reason)]);
+            $this->bodyStream->close();
+        }
+
         $this->connection->end("HTTP/1.1 {$statusCode} {$reason}\r\nConnection: close\r\n\r\n");
         $this->state = self::STATE_UPGRADED;
     }

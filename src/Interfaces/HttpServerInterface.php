@@ -71,7 +71,7 @@ interface HttpServerInterface
     /**
      * Configure the maximum allowed request body size for buffered requests.
      *
-     * Requests exceeding this size will be rejected with a 413 Payload Too Large.
+     * Requests exceeding this size will be rejected with a 413 Content Too Large.
      *
      * @param int $bytes Max size in bytes.
      *
