@@ -896,6 +896,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
                 $this->expectedBodyLength = self::parseContentLengthValue((string) reset($uniqueCl));
             }
+
+            if ($this->expectedBodyLength > $this->maxBodySize) {
+                throw new PayloadTooLargeException('Content Too Large');
+            }
         }
     }
 

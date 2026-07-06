@@ -18,13 +18,13 @@ use Hibla\Stream\Stream;
 use Hibla\Stream\ThroughStream;
 
 use function Hibla\await;
+use function Hibla\delay;
 
 afterEach(function () {
     Loop::reset();
 });
 
 describe('Core HTTP Functionality', function () {
-
     it('handles a real GET request end-to-end', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return ServerResponse::plaintext("Hello from the Server! Method: {$request->getMethod()}");
@@ -154,7 +154,6 @@ describe('Core HTTP Functionality', function () {
 });
 
 describe('Browser-Like Simulation', function () {
-
     it('persists cookies across requests like a real browser', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             if ($request->getUri() === '/login') {
@@ -275,7 +274,6 @@ describe('Browser-Like Simulation', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             $reqBody = $request->getBody();
             $resBody = new ThroughStream();
-
             $reqBody->pipe($resBody);
 
             return new ServerResponse(200, [], $resBody);
@@ -283,12 +281,7 @@ describe('Browser-Like Simulation', function () {
 
         try {
             $rawClient = new Connector();
-
             $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
-
-            $connection->write("POST /duplex HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
-
-            $connection->write("5\r\nhello\r\n");
 
             $echoPromise = new Promise(function ($resolve) use ($connection) {
                 $buffer = '';
@@ -300,6 +293,12 @@ describe('Browser-Like Simulation', function () {
                     }
                 });
             });
+
+            $connection->write("POST /duplex HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
+            await(delay(0.01));
+
+            $connection->write("5\r\nhello\r\n");
+            $connection->write("0\r\n\r\n");
 
             $rawResponse = await($echoPromise);
 
@@ -314,7 +313,6 @@ describe('Browser-Like Simulation', function () {
 });
 
 describe('Advanced Client-Server Interactions', function () {
-
     it('streams massive request bodies asynchronously without buffering in memory', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             $stream = $request->getBody();
@@ -337,7 +335,6 @@ describe('Advanced Client-Server Interactions', function () {
 
         try {
             $payload = str_repeat('X', 1024 * 1024);
-
             $response = await(Http::post($url, ['data' => $payload]));
 
             expect($response->status())->toBe(200)
@@ -383,7 +380,6 @@ describe('Advanced Client-Server Interactions', function () {
 
         try {
             $client = Http::client()->withHeader('X-Client-Auth', 'super-secret');
-
             $response = await($client->get($url));
 
             expect($response->status())->toBe(200)
@@ -459,58 +455,16 @@ describe('Advanced Client-Server Interactions', function () {
         }
     });
 
-    it('supports true duplex streaming by piping an incoming request stream directly to an outgoing response stream', function () {
-        [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $reqBody = $request->getBody();
-            $resBody = new ThroughStream();
-            $reqBody->pipe($resBody);
-
-            return new ServerResponse(200, [], $resBody);
-        }, maxBodySize: 10485760);
-
-        try {
-            $rawClient = new Connector();
-            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
-            $connection->write("POST /duplex HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
-
-            $connection->write("5\r\nhello\r\n");
-
-            $echoPromise = new Promise(function ($resolve) use ($connection) {
-                $buffer = '';
-                $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
-                    $buffer .= $chunk;
-                    if (str_contains($buffer, 'hello')) {
-                        $resolve($buffer);
-                        $connection->close();
-                    }
-                });
-            });
-
-            $rawResponse = await($echoPromise);
-
-            expect($rawResponse)->toContain('HTTP/1.1 200 OK')
-                ->and($rawResponse)->toContain('Transfer-Encoding: chunked')
-                ->and($rawResponse)->toContain("5\r\nhello\r\n")
-            ;
-        } finally {
-            $socket->close();
-        }
-    });
-
     it('safely handles slow clients that dribble request bodies over time', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('Received: ' . $request->getBody());
+            $body = await($request->getBufferedBody());
+
+            return ServerResponse::plaintext('Received: ' . $body);
         });
 
         try {
             $rawClient = new Connector();
             $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
-
-            $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n");
-
-            Loop::addTimer(0.01, fn () => $connection->write('Slo'));
-            Loop::addTimer(0.02, fn () => $connection->write('w '));
-            Loop::addTimer(0.03, fn () => $connection->write('Client'));
 
             $responsePromise = new Promise(function ($resolve) use ($connection) {
                 $buffer = '';
@@ -522,6 +476,11 @@ describe('Advanced Client-Server Interactions', function () {
                     }
                 });
             });
+
+            $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n");
+            Loop::addTimer(0.01, fn () => $connection->write('Slo'));
+            Loop::addTimer(0.02, fn () => $connection->write('w '));
+            Loop::addTimer(0.03, fn () => $connection->write('Client'));
 
             $rawResponse = await($responsePromise);
 
@@ -536,11 +495,9 @@ describe('Advanced Client-Server Interactions', function () {
     it('modifies streaming request data on-the-fly using a ThroughStream transformer', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             $reqBody = $request->getBody();
-
             $uppercaseStream = new ThroughStream(function (string $chunk) {
                 return strtoupper($chunk);
             });
-
             $reqBody->pipe($uppercaseStream);
 
             return new ServerResponse(200, [], $uppercaseStream);
@@ -549,12 +506,6 @@ describe('Advanced Client-Server Interactions', function () {
         try {
             $rawClient = new Connector();
             $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
-
-            $connection->write("POST /transform HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
-
-            $connection->write("5\r\nhello\r\n");
-            $connection->write("6\r\n world\r\n");
-            $connection->write("0\r\n\r\n");
 
             $responsePromise = new Promise(function ($resolve) use ($connection) {
                 $buffer = '';
@@ -566,6 +517,11 @@ describe('Advanced Client-Server Interactions', function () {
                     }
                 });
             });
+
+            $connection->write("POST /transform HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
+            $connection->write("5\r\nhello\r\n");
+            $connection->write("6\r\n world\r\n");
+            $connection->write("0\r\n\r\n");
 
             $rawResponse = await($responsePromise);
 
@@ -609,10 +565,8 @@ describe('Advanced Client-Server Interactions', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             try {
                 $form = await($request->getParsedBody());
-
                 $username = $form->get('username');
                 $file = $form->getFile('avatar');
-
                 $fileContent = $file ? file_get_contents($file->tmpPath) : null;
 
                 return ServerResponse::json([
@@ -679,8 +633,6 @@ describe('Advanced Client-Server Interactions', function () {
                 "Content-Type: multipart/form-data; boundary={$boundary}\r\n" .
                 'Content-Length: ' . strlen($payload) . "\r\n\r\n";
 
-            $connection->write($headers . $payload);
-
             $responsePromise = new Promise(function ($resolve) use ($connection) {
                 $buffer = '';
                 $connection->on('data', function ($chunk) use (&$buffer, $resolve, $connection) {
@@ -691,6 +643,8 @@ describe('Advanced Client-Server Interactions', function () {
                     }
                 });
             });
+
+            $connection->write($headers . $payload);
 
             $rawResponse = await($responsePromise);
 
@@ -707,8 +661,8 @@ describe('Advanced Client-Server Interactions', function () {
             try {
                 $form = await($request->getParsedBody());
                 $files = $form->getFiles('documents');
-
                 $fileDetails = [];
+
                 foreach ($files as $file) {
                     $fileDetails[] = [
                         'name' => $file->clientFilename,
@@ -744,8 +698,6 @@ describe('Advanced Client-Server Interactions', function () {
                 'Content-Length: ' . strlen($payload) . "\r\n\r\n" .
                 $payload;
 
-            $connection->write($httpRequest);
-
             $responsePromise = new Promise(function ($resolve, $reject) use ($connection) {
                 $buffer = '';
                 $connection->on('data', function ($chunk) use (&$buffer, $resolve, $reject, $connection) {
@@ -761,8 +713,9 @@ describe('Advanced Client-Server Interactions', function () {
                 });
             });
 
-            $rawResponse = await($responsePromise);
+            $connection->write($httpRequest);
 
+            $rawResponse = await($responsePromise);
             $jsonStart = strpos($rawResponse, "\r\n\r\n") + 4;
             $json = json_decode(substr($rawResponse, $jsonStart), true);
 
@@ -803,8 +756,6 @@ describe('Advanced Client-Server Interactions', function () {
                 "Content-Type: multipart/form-data; boundary=\"{$boundary}\"\r\n" .
                 'Content-Length: ' . strlen($payload) . "\r\n\r\n";
 
-            $connection->write($headers . $payload);
-
             $responsePromise = new Promise(function ($resolve, $reject) use ($connection) {
                 $buffer = '';
                 $connection->on('data', function ($chunk) use (&$buffer, $resolve, $reject, $connection) {
@@ -818,6 +769,8 @@ describe('Advanced Client-Server Interactions', function () {
                     }
                 });
             });
+
+            $connection->write($headers . $payload);
 
             $rawResponse = await($responsePromise);
             expect($rawResponse)->toContain('quoted_boundary_works');
@@ -875,7 +828,6 @@ describe('Advanced Client-Server Interactions', function () {
             }
 
             $boundary = $matches[1] !== '' ? $matches[1] : $matches[2];
-
             $parser = new MultipartParser($boundary);
 
             $s3UploadedData = '';
@@ -1021,7 +973,6 @@ describe('Advanced Client-Server Interactions', function () {
                 await($request->streamMultipart(
                     onFile: function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use (&$s3UploadedData, &$s3UploadedFilename): void {
                         $s3UploadedFilename = $filename;
-
                         $s3UploadedData = await($fileStream->readAllAsync());
                     },
                     onField: function (string $name, string $value) use (&$fields): void {
@@ -1058,8 +1009,7 @@ describe('Advanced Client-Server Interactions', function () {
                 ->and($response->json('target'))->toBe('s3://my-bucket/' . basename($localClientFile))
                 ->and($response->json('bytes_received'))->toBe(strlen($filePayload))
                 ->and($response->json('content_preview'))->toBe($filePayload)
-                ->and($response->json('album'))->toBe('vacation_2026')
-            ;
+                ->and($response->json('album'))->toBe('vacation_2026');
         } finally {
             if (file_exists($localClientFile)) {
                 unlink($localClientFile);

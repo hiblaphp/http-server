@@ -78,7 +78,7 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
         }
     });
 
-    it('applies real TCP backpressure to the OS socket when maxConcurrentRequests limit is reached', function () {
+    it('applies connection backpressure when pipeline depth exceeds the configured limit', function () {
         $socket = new SocketServer('tcp://127.0.0.1:0');
         $url = str_replace('tcp://', 'http://', $socket->getAddress());
 
@@ -127,7 +127,9 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
 
     it('seamlessly handles the Expect: 100-continue handshake inside a pipeline of requests', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('Body: ' . $request->getBody());
+            $body = await($request->getBufferedBody());
+
+            return ServerResponse::plaintext('Body: ' . $body);
         });
 
         try {
