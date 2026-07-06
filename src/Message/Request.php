@@ -97,9 +97,9 @@ class Request extends AbstractMessage
 
     /**
      * Asynchronously buffers the request body stream into memory and returns it as a string.
-     * 
+     *
      * @param int|null $maxBytes Optional override for the maximum allowed body size.
-     * 
+     *
      * @return PromiseInterface<string>
      */
     public function getBufferedBody(?int $maxBytes = null): PromiseInterface
@@ -111,35 +111,63 @@ class Request extends AbstractMessage
         $body = $this->getBody();
         if (\is_string($body)) {
             $this->cachedBody = $body;
+
             return Promise::resolved($body);
         }
 
         $limit = $maxBytes ?? $this->maxBodySize;
 
         /** @var Promise<string> */
-        return new Promise(function (callable $resolve, callable $reject) use ($body, $limit) {
+        return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($body, $limit) {
             $buffer = '';
 
-            $dataListener = function (string $chunk) use (&$buffer, $limit, $body, $reject) {
+            /** @var (\Closure(string): void)|null $dataListener */
+            $dataListener = null;
+            /** @var (\Closure(): void)|null $endListener */
+            $endListener = null;
+            /** @var (\Closure(\Throwable): void)|null $errorListener */
+            $errorListener = null;
+
+            $cleanup = function () use ($body, &$dataListener, &$endListener, &$errorListener) {
+                if ($dataListener !== null) {
+                    $body->removeListener('data', $dataListener);
+                }
+                if ($endListener !== null) {
+                    $body->removeListener('end', $endListener);
+                }
+                if ($errorListener !== null) {
+                    $body->removeListener('error', $errorListener);
+                }
+            };
+
+            $dataListener = function (string $chunk) use (&$buffer, $limit, $body, $reject, $cleanup) {
                 $buffer .= $chunk;
                 if (\strlen($buffer) > $limit) {
+                    $cleanup();
                     $body->close();
                     $reject(new PayloadTooLargeException('Payload Too Large: Exceeded ' . $limit . ' bytes.'));
                 }
             };
 
-            $body->on('data', $dataListener);
-
-            $body->on('end', function () use (&$buffer, $resolve, $body, $dataListener) {
-                $body->removeListener('data', $dataListener);
+            $endListener = function () use (&$buffer, $resolve, $cleanup) {
+                $cleanup();
                 $this->cachedBody = $buffer;
                 $resolve($buffer);
+            };
+
+            $errorListener = function (\Throwable $e) use ($reject, $cleanup) {
+                $cleanup();
+                $reject($e);
+            };
+
+            $onCancel(function () use ($cleanup, $body) {
+                $cleanup();
+                $body->close();
             });
 
-            $body->on('error', function (\Throwable $e) use ($reject, $body, $dataListener) {
-                $body->removeListener('data', $dataListener);
-                $reject($e);
-            });
+            $body->on('data', $dataListener);
+            $body->on('end', $endListener);
+            $body->on('error', $errorListener);
 
             $body->resume();
         });
@@ -147,14 +175,14 @@ class Request extends AbstractMessage
 
     /**
      * Asynchronously buffers the request body and decodes it as JSON.
-     * 
+     *
      * @param int|null $maxBytes Optional override for the maximum allowed body size.
-     * 
+     *
      * @return PromiseInterface<mixed>
      */
     public function getJson(?int $maxBytes = null): PromiseInterface
     {
-        return $this->getBufferedBody($maxBytes)->then(function (string $body) {
+        $promise = $this->getBufferedBody($maxBytes)->then(function (string $body) {
             if ($body === '') {
                 return null;
             }
@@ -166,6 +194,8 @@ class Request extends AbstractMessage
 
             return $decoded;
         });
+
+        return Promise::propagateCancellation($promise);
     }
 
     /**
@@ -347,7 +377,7 @@ class Request extends AbstractMessage
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
             $parser = new MultipartParser($boundary);
 
-            $state = new class() {
+            $state = new class () {
                 public int $pendingFibers = 0;
 
                 public bool $parserEnded = false;

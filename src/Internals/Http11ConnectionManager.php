@@ -132,14 +132,14 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
                     throw new InvalidResponseException('Request handler must return an instance of Response');
                 } else {
                     $body = $request->getBody();
-                    
-                    // SAFETY NET: If the user responded without fully consuming the incoming stream, 
+
+                    // SAFETY NET: If the user responded without fully consuming the incoming stream,
                     // Immidiately close the TCP connection to prevent HTTP request smuggling / desync.
                     if ($body instanceof ReadableStreamInterface && $body->isReadable()) {
                         $response->setHeader('Connection', 'close');
-                        $body->close(); 
+                        $body->close();
                     }
-                    
+
                     $item->response = $response;
                 }
             } catch (\Throwable $e) {
