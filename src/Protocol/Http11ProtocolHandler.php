@@ -1416,7 +1416,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         }
 
-        return $this->serverParamsCache = array_filter($params, fn($val) => $val !== null);
+        return $this->serverParamsCache = array_filter($params, fn ($val) => $val !== null);
     }
 
     /**
@@ -1436,6 +1436,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $port = substr((string) $address, $lastColon + 1);
             if (ctype_digit($port)) {
                 $ip = trim(substr((string) $address, 0, $lastColon), '[]');
+
                 return [$ip, (int) $port];
             }
         }

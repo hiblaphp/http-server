@@ -176,7 +176,8 @@ describe('Body Timeout (Inactivity)', function () {
 
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () {},
+            function () {
+            },
             bodyTimeout: 0.1
         );
 
@@ -204,13 +205,11 @@ describe('Body Timeout (Inactivity)', function () {
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
 
         await(delay(0.15));
-        $handler->handleData("12345");
+        $handler->handleData('12345');
 
         await(delay(0.15));
-        $handler->handleData("67890");
+        $handler->handleData('67890');
 
-        // Total time is 0.3s, which exceeds bodyTimeout (0.2s).
-        // But because inactivity between chunks was only 0.15s, the request succeeds!
         expect($buffer)->toContain('HTTP/1.1 200 OK');
     });
 
@@ -220,14 +219,15 @@ describe('Body Timeout (Inactivity)', function () {
 
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () {},
+            function () {
+            },
             bodyTimeout: 0.1
         );
 
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n");
         $handler->handleData("5\r\nhello\r\n");
 
-        await(delay(0.15)); // Client stalls here
+        await(delay(0.15));
 
         expect($buffer)->toContain('HTTP/1.1 408 Request Timeout');
     });
@@ -242,7 +242,8 @@ describe('Request Timeout (Absolute)', function () {
 
         $handler = new Http11ProtocolHandler(
             $connection,
-            function () {},
+            function () {
+            },
             bodyTimeout: 0.3,
             requestTimeout: 0.4
         );
@@ -250,12 +251,11 @@ describe('Request Timeout (Absolute)', function () {
         $handler->handleData("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 15\r\n\r\n");
 
         await(delay(0.2));
-        $handler->handleData("12345"); // Inactivity 0.2s (OK)
+        $handler->handleData('12345');
 
         await(delay(0.2));
-        $handler->handleData("67890"); // Inactivity 0.2s (OK)
+        $handler->handleData('67890');
 
-        // Total time is now 0.4s. Absolute requestTimeout triggers!
         await(delay(0.1));
 
         expect($buffer)->toContain('HTTP/1.1 408 Request Timeout');
@@ -268,20 +268,18 @@ describe('Request Timeout (Absolute)', function () {
         $handler = new Http11ProtocolHandler(
             $connection,
             function (Request $request, ProtocolHandlerInterface $protocol) {
-                // Simulate a slow database query or long-running SSE stream
-                await(delay(0.3));
-                $protocol->writeResponse(new Response(200, [], 'Slow Response'));
+                Loop::addFiber(new Fiber(function () use ($protocol) {
+                    await(delay(0.3));
+                    $protocol->writeResponse(new Response(200, [], 'Slow Response'));
+                }));
             },
             requestTimeout: 0.2
         );
 
-        // The request arrives instantly (0.0s)
         $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
-        // We wait longer than the requestTimeout.
         await(delay(0.4));
 
-        // It should NOT timeout, because the request phase finished instantly.
         expect($buffer)->not->toContain('408')
             ->and($buffer)->toContain('HTTP/1.1 200 OK')
             ->and($buffer)->toContain('Slow Response')
