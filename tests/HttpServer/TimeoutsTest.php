@@ -278,3 +278,139 @@ describe('Timeout Edge Cases', function () {
         }
     });
 });
+
+describe('Body Timeout (Inactivity Protection)', function () {
+    it('closes the connection with 408 if the client stalls during body upload', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                await($request->getBufferedBody());
+                return new ServerResponse(200);
+            } catch (\Throwable) {
+                return null;
+            }
+        }, bodyTimeout: 0.2);
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $responseBuffer = '';
+            $connection->on('data', function ($chunk) use (&$responseBuffer) {
+                $responseBuffer .= $chunk;
+            });
+
+            $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n");
+            $connection->write("some data");
+
+            await(delay(0.3)); 
+
+            expect($responseBuffer)->toContain('HTTP/1.1 408 Request Timeout');
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('resets the bodyTimeout on active transfer, allowing a slow but steady upload to succeed', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $body = await($request->getBufferedBody());
+            return new ServerResponse(200, [], "Body: $body");
+        }, bodyTimeout: 0.2);
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $responseBuffer = '';
+            $connection->on('data', function ($chunk) use (&$responseBuffer) {
+                $responseBuffer .= $chunk;
+            });
+
+            $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
+
+            await(delay(0.15));
+            $connection->write("12345");
+
+            await(delay(0.15));
+            $connection->write("67890");
+
+            await(delay(0.1));
+
+            expect($responseBuffer)->toContain('HTTP/1.1 200 OK')
+                ->and($responseBuffer)->toContain('Body: 1234567890');
+        } finally {
+            $socket->close();
+        }
+    });
+
+});
+
+describe('Request Timeout (Absolute Limit Protection)', function () {
+
+    it('closes the connection with 408 if the absolute request time exceeds the limit, despite active trickling', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            try {
+                await($request->getBufferedBody());
+                return new ServerResponse(200);
+            } catch (\Throwable) {
+                return null;
+            }
+        }, bodyTimeout: 0.3, requestTimeout: 0.4);
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $responseBuffer = '';
+            $connection->on('data', function ($chunk) use (&$responseBuffer) {
+                $responseBuffer .= $chunk;
+            });
+
+            $connection->write("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 15\r\n\r\n");
+
+            await(delay(0.2));
+            $connection->write("12345"); 
+
+            await(delay(0.2));
+            $connection->write("67890");
+
+            await(delay(0.1));
+
+            expect($responseBuffer)->toContain('HTTP/1.1 408 Request Timeout');
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('does not trigger requestTimeout for long-running responses like Server-Sent Events (SSE)', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            $stream = new ThroughStream();
+        
+            Loop::addTimer(0.3, function () use ($stream) {
+                $stream->write("data: hello\n\n");
+                $stream->end();
+            });
+
+            return new ServerResponse(200, ['Content-Type' => 'text/event-stream'], $stream);
+        }, requestTimeout: 0.2);
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $responseBuffer = '';
+            $connection->on('data', function ($chunk) use (&$responseBuffer) {
+                $responseBuffer .= $chunk;
+            });
+
+            $connection->write("GET /sse HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+            await(delay(0.4));
+
+            expect($responseBuffer)->toContain('HTTP/1.1 200 OK')
+                ->and($responseBuffer)->not->toContain('408')
+                ->and($responseBuffer)->toContain('data: hello');
+        } finally {
+            $socket->close();
+        }
+    });
+
+});
