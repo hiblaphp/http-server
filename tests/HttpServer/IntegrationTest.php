@@ -104,11 +104,12 @@ describe('True Integration Test', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withGracefulShutdownTimeout(1.0)
-                    ->start(function () {
+                    ->onRequest(function () {
                         await(delay(0.1));
 
                         return Response::plaintext('Drained Safely');
                     })
+                    ->start()
                 ;
                 exit(0);
             } catch (Throwable $e) {
@@ -168,11 +169,12 @@ describe('Clustered Integration Test', function () {
                     ->withCluster(2, ClusterOptions::make()->withWorkerRestartLimit(10))
                     ->withoutLogging()
                     ->withGracefulShutdownTimeout(1.0)
-                    ->start(function () {
+                    ->onRequest(function () {
                         await(delay(0.1));
 
                         return Response::plaintext('Drained Safely');
                     })
+                    ->start()
                 ;
                 exit(0);
             } catch (Throwable $e) {
@@ -220,7 +222,8 @@ describe('Server Configuration Integration Tests', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withMaxBodySize(5)
-                    ->start(fn () => Response::plaintext('OK'))
+                    ->onRequest(fn () => Response::plaintext('OK'))
+                    ->start()
                 ;
             },
             function ($fp) {
@@ -238,7 +241,8 @@ describe('Server Configuration Integration Tests', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withHeaderLimits(8192, 2)
-                    ->start(fn () => Response::plaintext('OK'))
+                    ->onRequest(fn () => Response::plaintext('OK'))
+                    ->start()
                 ;
             },
             function ($fp) {
@@ -256,7 +260,8 @@ describe('Server Configuration Integration Tests', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withHeaderTimeout(0.5)
-                    ->start(fn () => Response::plaintext('OK'))
+                    ->onRequest(fn () => Response::plaintext('OK'))
+                    ->start()
                 ;
             },
             function ($fp) {
@@ -276,7 +281,8 @@ describe('Server Configuration Integration Tests', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->withKeepAliveTimeout(0.4)
-                    ->start(fn () => Response::plaintext('OK'))
+                    ->onRequest(fn () => Response::plaintext('OK'))
+                    ->start()
                 ;
             },
             function ($fp) {
@@ -304,7 +310,8 @@ describe('Server Configuration Integration Tests', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->onStart(fn () => file_put_contents($lockFile, 'booted_successfully'))
-                    ->start(fn () => Response::plaintext('OK'))
+                    ->onRequest(fn () => Response::plaintext('OK'))
+                    ->start()
                 ;
             },
             function ($fp) use ($lockFile) {
@@ -327,12 +334,13 @@ describe('Server Configuration Integration Tests', function () {
             function ($address) {
                 HttpServer::create($address)
                     ->withoutLogging()
-                    ->start(function (Request $request) {
+                    ->onRequest(function (Request $request) {
                         $body = $request->getBody();
                         $isStream = $body instanceof ReadableStreamInterface;
 
                         return Response::plaintext($isStream ? 'STREAM_DETECTED' : 'STRING_DETECTED');
                     })
+                    ->start()
                 ;
             },
             function ($fp) {
@@ -353,13 +361,14 @@ describe('Clustered Mode Advanced Integration Tests', function () {
                 HttpServer::create($address)
                     ->withCluster(1)
                     ->withoutLogging()
-                    ->start(function (Request $request) {
+                    ->onRequest(function (Request $request) {
                         if ($request->getUri() === '/suicide') {
                             exit(1);
                         }
 
                         return Response::plaintext('ALIVE_REPLACEMENT');
                     })
+                    ->start()
                 ;
             },
             function ($address) {
@@ -393,7 +402,7 @@ describe('Clustered Mode Advanced Integration Tests', function () {
                 HttpServer::create($address)
                     ->withCluster(1, $options)
                     ->withoutLogging()
-                    ->start(function (Request $request) {
+                    ->onRequest(function (Request $request) {
                         if ($request->getUri() === '/bloat') {
                             $data = str_repeat('X', 30 * 1024 * 1024);
 
@@ -402,6 +411,7 @@ describe('Clustered Mode Advanced Integration Tests', function () {
 
                         return Response::plaintext('STABLE');
                     })
+                    ->start()
                 ;
             },
             function ($address) {
@@ -444,12 +454,13 @@ describe('Clustered Mode Advanced Integration Tests', function () {
                 HttpServer::create($address)
                     ->withCluster(1, $options)
                     ->withoutLogging()
-                    ->start(function () {
+                    ->onRequest(function () {
                         $f = defined('BOOTSTRAP_FILE_RAN') ? BOOTSTRAP_FILE_RAN : 'file_no';
                         $c = defined('BOOTSTRAP_CALLBACK_RAN') ? BOOTSTRAP_CALLBACK_RAN : 'callback_no';
 
                         return Response::plaintext("{$f}:{$c}");
                     })
+                    ->start()
                 ;
             },
             function ($address) use ($bootstrapFile) {
@@ -489,11 +500,12 @@ describe('Clustered Mode Advanced Integration Tests', function () {
                 HttpServer::create($address)
                     ->withCluster(1, $options)
                     ->withoutLogging()
-                    ->start(function (Request $request) {
+                    ->onRequest(function (Request $request) {
                         emit(['type' => 'custom_ipc', 'value' => 'hello_from_worker_' . getmypid()]);
 
                         return Response::plaintext('OK');
                     })
+                    ->start()
                 ;
             },
             function ($address) use ($ipcFile) {
