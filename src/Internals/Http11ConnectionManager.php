@@ -166,9 +166,13 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         try {
             $customResponse = ($this->errorHandler)($e, $request);
 
+            if ($customResponse === null) {
+                return $this->createFallbackErrorResponse($e);
+            }
+
             if (! $customResponse instanceof Response) {
                 return $this->createFallbackErrorResponse(
-                    new InvalidResponseException('Custom error handler must return a Response object')
+                    new InvalidResponseException('Custom error handler must return an instance of Response, or null to fallback to default.')
                 );
             }
 

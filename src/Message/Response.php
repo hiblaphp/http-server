@@ -98,6 +98,14 @@ class Response extends AbstractMessage
     }
 
     /**
+     * Helper factory to build an HTTP redirect response.
+     */
+    public static function redirect(string $url, int $status = 302): self
+    {
+        return new self($status, ['Location' => $url]);
+    }
+
+    /**
      * Helper factory to build a plain text response.
      */
     public static function plaintext(string $text, int $status = 200): self
