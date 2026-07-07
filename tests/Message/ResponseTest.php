@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\JsonEncodingException;
+use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Message\SseStream;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -83,9 +85,8 @@ it('creates json responses via factory', function () {
 it('throws an exception on invalid json data', function () {
     $resource = fopen('php://memory', 'r');
 
-    expect(fn () => Response::json($resource))
-        ->toThrow(JsonEncodingException::class, 'Unable to encode given data as JSON')
-    ;
+    expect(fn() => Response::json($resource))
+        ->toThrow(JsonEncodingException::class, 'Unable to encode given data as JSON');
 });
 
 it('creates html responses via factory', function () {
@@ -152,4 +153,134 @@ it('can accept a readable stream as a response body', function () {
     expect($response->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
         ->and($response->getBody())->toBe($dummyStream)
     ;
+});
+
+it('creates valid redirect responses via factory', function () {
+    $response = Response::redirect('https://example.com');
+    expect($response->getStatusCode())->toBe(302)
+        ->and($response->getHeaderLine('Location'))->toBe('https://example.com')
+    ;
+
+    $response301 = Response::redirect('/home', 301);
+    expect($response301->getStatusCode())->toBe(301)
+        ->and($response301->getHeaderLine('Location'))->toBe('/home')
+    ;
+});
+
+describe('Response::file', function () {
+    it('creates a 404 plaintext response when the file does not exist', function () {
+        $response = Response::file('/non/existent/file.txt');
+        expect($response->getStatusCode())->toBe(404)
+            ->and($response->getHeaderLine('Content-Type'))->toBe('text/plain; charset=utf-8')
+            ->and($response->getBody())->toBe('File Not Found')
+        ;
+    });
+
+    it('creates an asynchronous streaming response for an existing file', function () {
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_response_');
+        file_put_contents($tempFile, 'Hello, streaming world!');
+
+        $response = Response::file($tempFile);
+
+        expect($response->getStatusCode())->toBe(200)
+            ->and($response->getHeaderLine('Content-Type'))->toBe('application/octet-stream')
+            ->and($response->getHeaderLine('Content-Length'))->toBe((string) filesize($tempFile))
+            ->and($response->getHeaderLine('Accept-Ranges'))->toBe('bytes')
+            ->and($response->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
+        ;
+
+        $response->getBody()->close();
+        @unlink($tempFile);
+    });
+
+    it('detects correct content type based on file extension', function () {
+        $tempCss = sys_get_temp_dir() . '/test_style.css';
+        file_put_contents($tempCss, 'body { color: red; }');
+
+        $response = Response::file($tempCss);
+        expect($response->getHeaderLine('Content-Type'))->toBe('text/css; charset=utf-8');
+
+        $response->getBody()->close();
+        @unlink($tempCss);
+    });
+
+    it('handles valid HTTP Range requests and returns HTTP 206', function () {
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_range_');
+        $content = 'abcdefghij';
+        file_put_contents($tempFile, $content);
+
+        $request = new Request(
+            method: 'GET',
+            uri: '/',
+            headers: ['Range' => 'bytes=2-5']
+        );
+
+        $response = Response::file($tempFile, $request);
+
+        expect($response->getStatusCode())->toBe(206)
+            ->and($response->getHeaderLine('Content-Range'))->toBe('bytes 2-5/10')
+            ->and($response->getHeaderLine('Content-Length'))->toBe('4')
+            ->and($response->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
+        ;
+        $dataReceived = '';
+        $stream = $response->getBody();
+        $stream->on('data', function (string $chunk) use (&$dataReceived) {
+            $dataReceived .= $chunk;
+        });
+
+        $stream->resume();
+
+        Loop::run();
+
+        expect($dataReceived)->toBe('cdef');
+
+        @unlink($tempFile);
+    });
+
+    it('streams a large file (100MB) with a minimal memory footprint', function () {
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_large_file_');
+
+        $fp = fopen($tempFile, 'wb');
+
+        $oneMegabyteChunk = str_repeat('a', 1024 * 1024); 
+
+        for ($i = 0; $i < 100; $i++) {
+            fwrite($fp, $oneMegabyteChunk);
+        }
+
+        fclose($fp);
+
+        if (function_exists('memory_reset_peak_usage')) {
+            memory_reset_peak_usage();
+        }
+        
+        $startPeakMemory = memory_get_peak_usage();
+
+        $response = Response::file($tempFile);
+        expect($response->getStatusCode())->toBe(200)
+            ->and($response->getHeaderLine('Content-Length'))->toBe('104857600'); 
+
+        $bytesRead = 0;
+
+        $stream = $response->getBody();
+
+        $stream->on('data', function (string $chunk) use (&$bytesRead) {
+            $bytesRead += strlen($chunk);
+        });
+
+        $stream->resume();
+
+        Loop::run();
+
+        expect($bytesRead)->toBe(100 * 1024 * 1024);
+
+        $endPeakMemory = memory_get_peak_usage();
+        $memorySpike = $endPeakMemory - $startPeakMemory;
+
+        if (file_exists($tempFile)) {
+            unlink($tempFile);
+        }
+
+        expect($memorySpike)->toBeLessThan(10 * 1024 * 1024);
+    });
 });

@@ -7,6 +7,7 @@ namespace Hibla\HttpServer\Message;
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\JsonEncodingException;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
+use Hibla\Stream\Stream;
 
 /**
  * Concrete implementation of an outgoing HTTP Response DTO.
@@ -170,6 +171,88 @@ class Response extends AbstractMessage
     }
 
     /**
+     * Helper factory to build an asynchronous, streaming File Response.
+     * Optionally parses Range headers from the Request to support video scrubbing/seeking.
+     *
+     * @param string $path Local file path to read
+     * @param Request|null $request The incoming Request to inspect for "Range" headers
+     * @param array<string, string|list<string>> $headers Additional custom headers
+     */
+    public static function file(string $path, ?Request $request = null, array $headers = []): self
+    {
+        if (! file_exists($path) || ! is_readable($path)) {
+            return self::plaintext('File Not Found', 404);
+        }
+
+        $fileSize = filesize($path);
+        $contentType = self::detectMimeType($path);
+        $stream = Stream::readableFile($path);
+
+        $responseHeaders = [
+            'content-type' => $contentType,
+            'accept-ranges' => 'bytes',
+        ];
+
+        if ($request === null || ! $request->hasHeader('Range')) {
+            $responseHeaders['content-length'] = (string) $fileSize;
+
+            return new self(200, [...$responseHeaders, ...$headers], $stream);
+        }
+
+        $rangeHeader = $request->getHeaderLine('Range');
+
+        if (preg_match('/bytes=(\d*)-(\d*)/i', $rangeHeader, $matches) !== 1) {
+            $responseHeaders['content-length'] = (string) $fileSize;
+
+            return new self(200, [...$responseHeaders, ...$headers], $stream);
+        }
+
+        $start = $matches[1] !== '' ? (int) $matches[1] : 0;
+        $end = $matches[2] !== '' ? (int) $matches[2] : ($fileSize - 1);
+
+        if ($start >= $fileSize || $end < $start) {
+            $responseHeaders['content-length'] = (string) $fileSize;
+
+            return new self(200, [...$responseHeaders, ...$headers], $stream);
+        }
+
+        $end = min($end, $fileSize - 1);
+        $contentLength = $end - $start + 1;
+
+        $stream->seek($start);
+
+        $bytesRemaining = $contentLength;
+        $limiter = Stream::through(function (string $chunk) use (&$bytesRemaining, $stream) {
+            if ($bytesRemaining <= 0) {
+                $stream->close();
+
+                return '';
+            }
+
+            if (\strlen($chunk) >= $bytesRemaining) {
+                $chunk = substr($chunk, 0, $bytesRemaining);
+                $bytesRemaining = 0;
+                $stream->close();
+
+                return $chunk;
+            }
+
+            $bytesRemaining -= \strlen($chunk);
+
+            return $chunk;
+        });
+
+        $responseHeaders['content-length'] = (string) $contentLength;
+        $responseHeaders['content-range'] = "bytes {$start}-{$end}/{$fileSize}";
+
+        return new self(
+            statusCode: 206,
+            headers: [...$responseHeaders, ...$headers],
+            body: $stream->pipe($limiter)
+        );
+    }
+
+    /**
      * Retrieves the HTTP status code of the response (e.g., 200, 404).
      *
      * @return int The status code.
@@ -187,5 +270,28 @@ class Response extends AbstractMessage
     public function getReasonPhrase(): string
     {
         return $this->reasonPhrase;
+    }
+
+    /**
+     * Helper to detect file MIME types safely based on file extension.
+     */
+    private static function detectMimeType(string $path): string
+    {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        $map = [
+            'css' => 'text/css; charset=utf-8',
+            'js' => 'application/javascript; charset=utf-8',
+            'png' => 'image/png',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
+            'pdf' => 'application/pdf',
+            'json' => 'application/json; charset=utf-8',
+            'html' => 'text/html; charset=utf-8',
+        ];
+
+        return $map[$ext] ?? 'application/octet-stream';
     }
 }
