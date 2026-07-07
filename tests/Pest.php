@@ -30,6 +30,7 @@ function mockConnection(
     ?int &$resumeCount = null
 ): ConnectionInterface {
     $connection = Mockery::mock(ConnectionInterface::class);
+    $connection->shouldIgnoreMissing();
     $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
 
     $connection->shouldReceive('write')->zeroOrMoreTimes()->andReturnUsing(function (string $data) use (&$buffer) {
@@ -87,6 +88,7 @@ function mockConnection(
 function mockStreamingConnection(string &$buffer): ConnectionInterface
 {
     $connection = Mockery::mock(ConnectionInterface::class);
+    $connection->shouldIgnoreMissing();
     $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
 
     $connection->shouldReceive('write')->andReturnUsing(function (string $data) use (&$buffer) {
@@ -128,6 +130,7 @@ function mockStreamingConnection(string &$buffer): ConnectionInterface
 function createCloseableMockConnection(string &$buffer): ConnectionInterface
 {
     $connection = Mockery::mock(ConnectionInterface::class);
+    $connection->shouldIgnoreMissing();
     $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
 
     $connection->shouldReceive('write')->andReturnUsing(function (string $data) use (&$buffer) {
@@ -173,6 +176,8 @@ function createTestServer(
     int $maxHeaderCount = 100,
     array $context = [],
     ?float $headerTimeout = null,
+    ?float $bodyTimeout = null,
+    ?float $requestTimeout = null,
     ?float $keepAliveTimeout = null,
     int $maxConcurrentRequestsPerConnection = 128,
     int $maxUploadedFiles = 20,
@@ -188,6 +193,8 @@ function createTestServer(
         $maxHeaderSize,
         $maxHeaderCount,
         $headerTimeout,
+        $bodyTimeout,
+        $requestTimeout,
         $keepAliveTimeout,
         $maxConcurrentRequestsPerConnection,
         $maxUploadedFiles,

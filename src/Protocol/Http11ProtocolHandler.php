@@ -65,6 +65,13 @@ use Hibla\Stream\Interfaces\ReadableStreamInterface;
  * - headerTimeout caps the time allowed to receive complete HTTP headers to
  *   prevent Slowloris attacks (→ 408).
  *
+ * - bodyTimeout caps the inactivity time allowed between receiving body data chunks.
+ *   Protects against dropped connections during large uploads without punishing slow
+ *   connections (→ 408).
+ *
+ * - requestTimeout sets an absolute maximum time allowed to receive the entire
+ *   request (Headers + Body). Protects against trickle-attacks (Slow Post) (→ 408).
+ *
  * - keepAliveTimeout limits the time a persistent connection can remain idle
  *   before being gracefully closed, preventing resource starvation.
  *
@@ -148,6 +155,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private ?string $headerTimerId = null;
 
+    private ?string $bodyTimerId = null;
+
+    private ?string $requestTimerId = null;
+
     private ?string $keepAliveTimerId = null;
 
     /**
@@ -180,6 +191,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * @param int $maxHeaderSize Maximum total size of the header block in bytes.
      * @param int $maxHeaderCount Maximum number of header fields allowed per request.
      * @param float|null $headerTimeout Maximum time allowed to receive complete headers (Slowloris protection).
+     * @param float|null $bodyTimeout Maximum inactivity time allowed between receiving body chunks.
+     * @param float|null $requestTimeout Absolute maximum time allowed to receive the entire request (headers + body).
      * @param float|null $keepAliveTimeout Maximum idle time allowed before closing a persistent connection.
      * @param int $maxUploadedFiles Maximum number of uploaded files in multipart content type.
      * @param int $maxFormFields maximum number of array of bodys in a multipart request.
@@ -191,12 +204,15 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         private readonly int $maxHeaderSize = 16384,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
+        private readonly ?float $bodyTimeout = null,
+        private readonly ?float $requestTimeout = null,
         private readonly ?float $keepAliveTimeout = null,
         private readonly int $maxUploadedFiles = 20,
         private readonly int $maxFormFields = 1000
     ) {
         $this->handleConnectionCloseEvent();
         $this->startHeaderTimer();
+        $this->startRequestTimer();
     }
 
     /**
@@ -230,11 +246,14 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         if ($this->keepAliveTimerId !== null) {
             $this->cancelKeepAliveTimer();
             $this->startHeaderTimer();
+            $this->startRequestTimer();
         }
 
         $this->buffer .= $data;
 
         while ($this->bufferOffset < \strlen($this->buffer)) {
+            $startOffset = $this->bufferOffset;
+
             $advanced = match ($this->state) {
                 self::STATE_HEADERS => $this->parseHeadersPhase(),
                 self::STATE_BODY_LENGTH => $this->parseBodyLengthPhase(),
@@ -243,6 +262,12 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                 self::STATE_CHUNK_TRAILER => $this->parseChunkTrailerPhase(),
                 default => false,
             };
+
+            // If we are actively parsing a body and successfully consumed bytes,
+            // reset the inactivity timer to prevent dropping active uploads.
+            if ($this->state !== self::STATE_HEADERS && $this->state !== self::STATE_UPGRADED && $this->bufferOffset > $startOffset) {
+                $this->startBodyTimer();
+            }
 
             if (! $advanced) {
                 break;
@@ -483,8 +508,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         if ($this->isChunked) {
             $this->state = self::STATE_CHUNK_SIZE;
+            $this->startBodyTimer();
         } elseif ($this->expectedBodyLength > 0) {
             $this->state = self::STATE_BODY_LENGTH;
+            $this->startBodyTimer();
         } else {
             $this->finalizeRequest();
         }
@@ -1104,6 +1131,9 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function finalizeRequest(): void
     {
+        $this->cancelBodyTimer();
+        $this->cancelRequestTimer();
+
         if ($this->bodyStream !== null) {
             $this->bodyStream->end();
         }
@@ -1177,6 +1207,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         if (\strlen($this->buffer) > $this->bufferOffset) {
             $this->startHeaderTimer();
+            $this->startRequestTimer();
         } else {
             $this->startKeepAliveTimer();
         }
@@ -1198,6 +1229,48 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         if ($this->headerTimerId !== null) {
             Loop::cancelTimer($this->headerTimerId);
             $this->headerTimerId = null;
+        }
+    }
+
+    private function startBodyTimer(): void
+    {
+        if ($this->bodyTimeout === null) {
+            return;
+        }
+
+        if ($this->bodyTimerId !== null) {
+            Loop::cancelTimer($this->bodyTimerId);
+        }
+
+        $this->bodyTimerId = Loop::addTimer($this->bodyTimeout, function () {
+            $this->sendErrorAndClose(408, 'Request Timeout');
+        });
+    }
+
+    private function cancelBodyTimer(): void
+    {
+        if ($this->bodyTimerId !== null) {
+            Loop::cancelTimer($this->bodyTimerId);
+            $this->bodyTimerId = null;
+        }
+    }
+
+    private function startRequestTimer(): void
+    {
+        if ($this->requestTimeout === null || $this->requestTimerId !== null) {
+            return;
+        }
+
+        $this->requestTimerId = Loop::addTimer($this->requestTimeout, function () {
+            $this->sendErrorAndClose(408, 'Request Timeout');
+        });
+    }
+
+    private function cancelRequestTimer(): void
+    {
+        if ($this->requestTimerId !== null) {
+            Loop::cancelTimer($this->requestTimerId);
+            $this->requestTimerId = null;
         }
     }
 
@@ -1224,6 +1297,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     private function cancelAllTimers(): void
     {
         $this->cancelHeaderTimer();
+        $this->cancelBodyTimer();
+        $this->cancelRequestTimer();
         $this->cancelKeepAliveTimer();
     }
 
@@ -1334,14 +1409,23 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $params['SSL_CIPHER'] = $meta['crypto']['cipher_name'] ?? null;
         }
 
-        if (isset($meta['wrapper_data']['peer_certificate'])) {
-            $certInfo = openssl_x509_parse($meta['wrapper_data']['peer_certificate']);
-            if (\is_array($certInfo) && isset($certInfo['name'])) {
-                $params['SSL_CLIENT_CERT_SUBJECT'] = $certInfo['name'];
+       if (isset($meta['wrapper_data']) && \is_array($meta['wrapper_data'])) {
+            $wrapperData = $meta['wrapper_data'];
+
+            if (isset($wrapperData['peer_certificate'])) {
+                $peerCert = $wrapperData['peer_certificate'];
+
+                if (\is_string($peerCert) || $peerCert instanceof \OpenSSLCertificate) {
+                    $certInfo = openssl_x509_parse($peerCert);
+                    
+                    if (\is_array($certInfo) && isset($certInfo['name'])) {
+                        $params['SSL_CLIENT_CERT_SUBJECT'] = $certInfo['name'];
+                    }
+                }
             }
         }
 
-        return $this->serverParamsCache = array_filter($params, fn($val) => $val !== null);
+        return $this->serverParamsCache = array_filter($params, fn ($val) => $val !== null);
     }
 
     /**
@@ -1361,6 +1445,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $port = substr((string) $address, $lastColon + 1);
             if (ctype_digit($port)) {
                 $ip = trim(substr((string) $address, 0, $lastColon), '[]');
+
                 return [$ip, (int) $port];
             }
         }

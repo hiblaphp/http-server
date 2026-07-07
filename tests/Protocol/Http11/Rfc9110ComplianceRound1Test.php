@@ -368,8 +368,10 @@ describe('RFC 9112 section 9.3 — Connection Persistence', function () {
     it('keeps the connection open after responding to an HTTP/1.0 request with Connection: keep-alive', function () {
         $buffer = '';
         $connection = Mockery::mock(ConnectionInterface::class);
-        $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
 
+        $connection->shouldIgnoreMissing();
+
+        $connection->shouldReceive('getRemoteAddress')->andReturn('127.0.0.1');
         $connection->shouldReceive('on')->zeroOrMoreTimes();
 
         $connection->shouldReceive('write')->andReturnUsing(function (string $data) use (&$buffer) {
@@ -377,7 +379,9 @@ describe('RFC 9112 section 9.3 — Connection Persistence', function () {
 
             return true;
         });
+
         $connection->shouldReceive('close')->never();
+        $connection->shouldReceive('end')->never();
 
         $handler = new Http11ProtocolHandler(
             $connection,

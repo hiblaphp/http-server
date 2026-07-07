@@ -55,6 +55,10 @@ final class HttpServer implements HttpServerInterface
 
     private ?float $headerTimeout = null;
 
+    private ?float $bodyTimeout = null;
+
+    private ?float $requestTimeout = null;
+
     private ?float $keepAliveTimeout = null;
 
     /**
@@ -282,6 +286,28 @@ final class HttpServer implements HttpServerInterface
     /**
      * {@inheritdoc}
      */
+    public function withBodyTimeout(?float $seconds): static
+    {
+        $clone = clone $this;
+        $clone->bodyTimeout = $seconds;
+
+        return $clone;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function withRequestTimeout(?float $seconds): static
+    {
+        $clone = clone $this;
+        $clone->requestTimeout = $seconds;
+
+        return $clone;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function withKeepAliveTimeout(?float $seconds): static
     {
         $clone = clone $this;
@@ -371,6 +397,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
+            $this->bodyTimeout,
+            $this->requestTimeout,
             $this->keepAliveTimeout,
             $this->maxConcurrentRequestsPerConnection,
             $this->maxUploadedFiles,
@@ -419,6 +447,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
+            $this->bodyTimeout,
+            $this->requestTimeout,
             $this->keepAliveTimeout,
             $this->maxConcurrentRequestsPerConnection,
             $this->maxUploadedFiles,
@@ -462,6 +492,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
+            $this->bodyTimeout,
+            $this->requestTimeout,
             $this->keepAliveTimeout,
             $this->onStartCallback,
             $this->gracefulShutdownTimeout,
@@ -611,6 +643,8 @@ final class HttpServer implements HttpServerInterface
         int $maxHeaderSize = 8192,
         int $maxHeaderCount = 100,
         ?float $headerTimeout = null,
+        ?float $bodyTimeout = null,
+        ?float $requestTimeout = null,
         ?float $keepAliveTimeout = null,
         int $maxConcurrentRequestsPerConnection = 128,
         int $maxUploadedFiles = 20,
@@ -625,6 +659,8 @@ final class HttpServer implements HttpServerInterface
             $maxHeaderSize,
             $maxHeaderCount,
             $headerTimeout,
+            $bodyTimeout,
+            $requestTimeout,
             $keepAliveTimeout,
             $maxConcurrentRequestsPerConnection,
             &$activeManagers,
@@ -638,6 +674,8 @@ final class HttpServer implements HttpServerInterface
                 $maxHeaderSize,
                 $maxHeaderCount,
                 $headerTimeout,
+                $bodyTimeout,
+                $requestTimeout,
                 $keepAliveTimeout,
                 $maxConcurrentRequestsPerConnection,
                 $maxUploadedFiles,
