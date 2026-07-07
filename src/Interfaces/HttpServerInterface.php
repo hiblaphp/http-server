@@ -111,6 +111,26 @@ interface HttpServerInterface
     public function withHeaderTimeout(?float $seconds): static;
 
     /**
+     * Set the maximum inactivity time allowed between receiving body data chunks.
+     * Protects against dropped client connections during large uploads. Disabled by default.
+     *
+     * @param float|null $seconds Timeout in seconds, or null to disable.
+     *
+     * @return static
+     */
+    public function withBodyTimeout(?float $seconds): static;
+
+    /**
+     * Set the absolute maximum time allowed to receive an entire request (headers + body).
+     * Protects against trickle-attacks (Slow Post). Disabled by default.
+     *
+     * @param float|null $seconds Timeout in seconds, or null to disable.
+     *
+     * @return static
+     */
+    public function withRequestTimeout(?float $seconds): static;
+
+    /**
      * Set the maximum idle time allowed for a persistent connection (keep-alive)
      * to wait for the next request. Disabled by default.
      *

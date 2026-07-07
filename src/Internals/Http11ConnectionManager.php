@@ -42,6 +42,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         private readonly int $maxHeaderSize = 8192,
         private readonly int $maxHeaderCount = 100,
         private readonly ?float $headerTimeout = null,
+        private readonly ?float $bodyTimeout = null,
+        private readonly ?float $requestTimeout = null,
         private readonly ?float $keepAliveTimeout = null,
         private readonly int $maxConcurrentRequestsPerConnection = 128,
         private readonly int $maxUploadedFiles = 20,
@@ -59,6 +61,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             $this->maxHeaderSize,
             $this->maxHeaderCount,
             $this->headerTimeout,
+            $this->bodyTimeout,
+            $this->requestTimeout,
             $this->keepAliveTimeout,
             $this->maxUploadedFiles,
             $this->maxFormFields
