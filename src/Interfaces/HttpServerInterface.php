@@ -8,6 +8,7 @@ use Hibla\HttpServer\ClusterOptions;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ServerInterface;
+use Hibla\HttpServer\Exceptions\InvalidConfigurationException;
 
 /**
  * Defines the contract for the high-level HTTP Server.
@@ -181,6 +182,15 @@ interface HttpServerInterface
     public function onStart(callable $callback): static;
 
     /**
+     * Register the primary request handler for the HTTP server.
+     *
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     *
+     * @return static
+     */
+    public function onRequest(callable $requestHandler): static;
+
+    /**
      * Set the maximum time allowed for graceful shutdown.
      *
      * If active requests do not finish within this time during a shutdown,
@@ -218,9 +228,8 @@ interface HttpServerInterface
     /**
      * Start the HTTP Server and block the current thread to process incoming requests.
      *
-     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler Callback invoked for each incoming request.
-     *
      * @return void
+     * @throws InvalidConfigurationException If no request handler is set.
      */
-    public function start(callable $requestHandler): void;
+    public function start(): void;
 }

@@ -16,6 +16,9 @@ use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\Interfaces\ServerInterface;
 use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
+use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
+use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 
 use function Hibla\asyncFn;
 
@@ -54,7 +57,12 @@ final class HttpServer implements HttpServerInterface
     private $onStartCallback = null;
 
     /**
-     * @var (callable(\Throwable, Message\Request): (Message\Response|null))|null
+     * @var (callable(Request, ProtocolHandlerInterface): (Response|null))|null
+     */
+    private mixed $requestHandler = null;
+
+    /**
+     * @var (callable(\Throwable, Request): (Response|null))|null
      */
     private mixed $errorHandler = null;
 
@@ -244,6 +252,17 @@ final class HttpServer implements HttpServerInterface
     /**
      * {@inheritdoc}
      */
+    public function onRequest(callable $requestHandler): static
+    {
+        $clone = clone $this;
+        $clone->requestHandler = $requestHandler;
+
+        return $clone;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function withMaxBodySize(int $bytes): static
     {
         $clone = clone $this;
@@ -350,8 +369,14 @@ final class HttpServer implements HttpServerInterface
     /**
      * {@inheritdoc}
      */
-    public function start(callable $requestHandler): void
+    public function start(): void
     {
+        $requestHandler = $this->requestHandler;
+
+        if ($requestHandler === null) {
+            throw new InvalidConfigurationException('Cannot start the server without a request handler. Please call onRequest() first.');
+        }
+
         if ($this->customSocketServer !== null) {
             $this->runCustomSocket($requestHandler);
 
@@ -400,6 +425,9 @@ final class HttpServer implements HttpServerInterface
         });
     }
 
+    /**
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     */
     private function runCustomSocket(callable $requestHandler): void
     {
         if ($this->customSocketServer === null) {
@@ -441,6 +469,9 @@ final class HttpServer implements HttpServerInterface
         Loop::run();
     }
 
+    /**
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     */
     private function runSingleProcess(callable $requestHandler): void
     {
         if ($this->onStartCallback !== null) {
@@ -490,6 +521,10 @@ final class HttpServer implements HttpServerInterface
         Loop::run();
     }
 
+    /**
+     * @param int $workers
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     */
     private function runCluster(int $workers, callable $requestHandler): void
     {
         /** @var array<string, mixed> $context */
@@ -550,8 +585,7 @@ final class HttpServer implements HttpServerInterface
                 ) {
                     $this->log("[Worker {$message->pid}] {$data['message']}");
                 }
-            })
-        ;
+            });
 
         $options = $this->clusterOptions;
 
@@ -686,7 +720,7 @@ final class HttpServer implements HttpServerInterface
             &$activeManagers,
             $maxUploadedFiles,
             $maxFormFields,
-            $errorHandler,
+            $errorHandler
         ): void {
 
             $manager = new Http11ConnectionManager(
