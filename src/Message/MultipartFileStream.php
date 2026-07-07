@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Hibla\HttpServer\Message;
 
 use Hibla\EventLoop\Loop;
+use Hibla\HttpServer\Exceptions\StreamClosedException;
+use Hibla\HttpServer\Exceptions\StreamNotWritableException;
+use Hibla\HttpServer\Exceptions\StreamTransferException;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
 use Hibla\Stream\Handlers\ReadAllHandler;
@@ -175,7 +178,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         // Do NOT reset $this->endedEarly to false here.
         // It serves as a permanent marker that EOF was reached cleanly.
 
-        $this->rejectPendingReads(new \RuntimeException('Stream closed'));
+        $this->rejectPendingReads(new StreamClosedException('Stream closed'));
 
         parent::close();
     }
@@ -242,7 +245,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         }
 
         if ($this->closed) {
-            return Promise::rejected(new \RuntimeException('Stream is closed'));
+            return Promise::rejected(new StreamClosedException('Stream is closed'));
         }
 
         $len = $length ?? 65536;
@@ -290,7 +293,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
         }
 
         if ($this->closed) {
-            return Promise::rejected(new \RuntimeException('Stream is closed'));
+            return Promise::rejected(new StreamClosedException('Stream is closed'));
         }
 
         $maxLen = $maxLength ?? 65536;
@@ -309,7 +312,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
     public function readAllAsync(int $maxLength = 1048576): PromiseInterface
     {
         if ($this->closed && ! $this->endedEarly) {
-            return Promise::rejected(new \RuntimeException('Stream is closed'));
+            return Promise::rejected(new StreamClosedException('Stream is closed'));
         }
 
         $buffer = $this->readBuffer;
@@ -324,11 +327,11 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
     public function pipeAsync(WritableStreamInterface $destination, array $options = []): PromiseInterface
     {
         if ($this->closed && ! $this->endedEarly) {
-            return Promise::rejected(new \RuntimeException('Stream is closed'));
+            return Promise::rejected(new StreamClosedException('Stream is closed'));
         }
 
         if (! $destination->isWritable()) {
-            return Promise::rejected(new \RuntimeException('Destination is not writable'));
+            return Promise::rejected(new StreamNotWritableException('Destination is not writable'));
         }
 
         $endDestination = (bool) ($options['end'] ?? true);
@@ -389,7 +392,7 @@ class MultipartFileStream extends ThroughStream implements PromiseReadableStream
             $this->detachPipeHandlers($destination, $dataHandler, $endHandler, $errorHandler, $closeHandler);
             if ($this->isReadable() && ! $this->endedEarly) {
                 $state->hasError = true;
-                $promise->reject(new \RuntimeException('Destination closed before transfer completed'));
+                $promise->reject(new StreamTransferException('Destination closed before transfer completed'));
             }
         };
 

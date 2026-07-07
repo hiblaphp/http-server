@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Message;
 
+use Hibla\HttpServer\Exceptions\FileAlreadyMovedException;
+use Hibla\HttpServer\Exceptions\UploadedFileNotFoundException;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
@@ -45,11 +47,11 @@ final class UploadedFile
     public function moveTo(string $destinationPath): PromiseInterface
     {
         if ($this->moved) {
-            return Promise::rejected(new \RuntimeException('File has already been moved.'));
+            return Promise::rejected(new FileAlreadyMovedException('File has already been moved.'));
         }
 
         if (! file_exists($this->tmpPath)) {
-            return Promise::rejected(new \RuntimeException('Temporary file no longer exists.'));
+            return Promise::rejected(new UploadedFileNotFoundException('Temporary file no longer exists.'));
         }
 
         /** @var Promise<void> */

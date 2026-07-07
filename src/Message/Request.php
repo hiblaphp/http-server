@@ -9,6 +9,7 @@ use Hibla\HttpServer\Exceptions\MalformedMultipartException;
 use Hibla\HttpServer\Exceptions\MessageParsingException;
 use Hibla\HttpServer\Exceptions\MultipartException;
 use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
+use Hibla\HttpServer\Exceptions\StreamTransferException;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
@@ -321,12 +322,12 @@ class Request extends AbstractMessage
                 });
 
                 $parser->on('error', static function (mixed $e) use ($rej) {
-                    $rej($e instanceof \Throwable ? $e : new \RuntimeException('Parser error'));
+                    $rej($e instanceof \Throwable ? $e : new MultipartException('Parser error'));
                 });
 
                 if ($isStream && $body instanceof ReadableStreamInterface) {
                     $body->on('error', static function (mixed $e) use ($rej) {
-                        $rej($e instanceof \Throwable ? $e : new \RuntimeException('Body stream error'));
+                        $rej($e instanceof \Throwable ? $e : new StreamTransferException('Body stream error'));
                     });
                 }
             });
@@ -393,7 +394,7 @@ class Request extends AbstractMessage
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
             $parser = new MultipartParser($boundary);
 
-            $state = new class () {
+            $state = new class() {
                 public int $pendingFibers = 0;
 
                 public bool $parserEnded = false;
