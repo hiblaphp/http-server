@@ -159,6 +159,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     public ?\Closure $onEarlyResponse = null;
 
     /**
+     * @var array<string, mixed>|null
+     */
+    private ?array $serverParamsCache = null;
+
+    /**
      * Per-process cache mapping lowercase wire-format header names (e.g. "content-type")
      * to their display-formatted equivalents (e.g. "Content-Type"). Populated lazily on
      * first encounter, eliminating repeated ucwords/str_replace calls for the same header
@@ -717,7 +722,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         $this->processFramingHeaders($headers, $protocolVersion, $forceClose);
 
-        $serverParams = ['REMOTE_ADDR' => $this->connection->getRemoteAddress()];
+        $serverParams = $this->getServerParams();
         $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
 
         $this->currentRequest->maxHeaderSize = $this->maxHeaderSize;
@@ -1286,5 +1291,80 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         }
 
         return self::$headerNameCache[$name] = str_replace(' ', '-', ucwords(str_replace('-', ' ', $name)));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function getServerParams(): array
+    {
+        if ($this->serverParamsCache !== null) {
+            return $this->serverParamsCache;
+        }
+
+        $params = [];
+
+        $remote = $this->connection->getRemoteAddress();
+        if ($remote !== null) {
+            [$remoteIp, $remotePort] = $this->parseSocketAddress($remote);
+            $params['REMOTE_ADDR'] = $remoteIp;
+            if ($remotePort !== null) {
+                $params['REMOTE_PORT'] = (string) $remotePort;
+            }
+        }
+
+        $local = $this->connection->getLocalAddress();
+        if ($local !== null) {
+            [$localIp, $localPort] = $this->parseSocketAddress($local);
+            $params['SERVER_ADDR'] = $localIp;
+            if ($localPort !== null) {
+                $params['SERVER_PORT'] = (string) $localPort;
+            }
+        }
+
+        $params['REQUEST_SCHEME'] = 'http';
+
+        $meta = $this->connection->getMetadata();
+
+        if (isset($meta['crypto']) && \is_array($meta['crypto'])) {
+            $params['REQUEST_SCHEME'] = 'https';
+            $params['HTTPS'] = 'on';
+
+            $params['SSL_PROTOCOL'] = $meta['crypto']['protocol'] ?? null;
+            $params['SSL_CIPHER'] = $meta['crypto']['cipher_name'] ?? null;
+        }
+
+        if (isset($meta['wrapper_data']['peer_certificate'])) {
+            $certInfo = openssl_x509_parse($meta['wrapper_data']['peer_certificate']);
+            if (\is_array($certInfo) && isset($certInfo['name'])) {
+                $params['SSL_CLIENT_CERT_SUBJECT'] = $certInfo['name'];
+            }
+        }
+
+        return $this->serverParamsCache = array_filter($params, fn($val) => $val !== null);
+    }
+
+    /**
+     * @return array{0: string, 1: int|null}
+     */
+    private function parseSocketAddress(string $uri): array
+    {
+        $address = preg_replace('#^[a-z]+://#i', '', $uri);
+
+        if (str_starts_with($uri, 'unix://')) {
+            return [(string) $address, null];
+        }
+
+        $lastColon = strrpos((string) $address, ':');
+
+        if ($lastColon !== false) {
+            $port = substr((string) $address, $lastColon + 1);
+            if (ctype_digit($port)) {
+                $ip = trim(substr((string) $address, 0, $lastColon), '[]');
+                return [$ip, (int) $port];
+            }
+        }
+
+        return [(string) $address, null];
     }
 }
