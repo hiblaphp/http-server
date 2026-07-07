@@ -576,6 +576,7 @@ final class HttpServer implements HttpServerInterface
         };
 
         $pool = new ProcessPool(size: $workers)
+            ->withoutTimeout()
             ->onMessage(function (WorkerMessage $message) {
                 $data = $message->data;
                 if (
