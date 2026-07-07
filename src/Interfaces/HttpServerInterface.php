@@ -141,6 +141,18 @@ interface HttpServerInterface
     public function withKeepAliveTimeout(?float $seconds): static;
 
     /**
+     * Register a custom error handler to intercept uncaught exceptions from the request handler.
+     *
+     * Allows framework developers to render beautiful HTML error pages (like Whoops/Ignition)
+     * or format standardized JSON error responses for APIs.
+     *
+     * @param callable(\Throwable, Request): (Response|null) $errorHandler
+     *
+     * @return static
+     */
+    public function onError(callable $errorHandler): static;
+
+    /**
      * Register a late-stage runtime callback to be executed once per process immediately
      * before the HTTP server binds to its socket and starts accepting connections.
      *

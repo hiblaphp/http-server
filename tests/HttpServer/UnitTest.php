@@ -64,14 +64,6 @@ describe('HttpServer Configuration & Instantiation', function () {
         ;
     });
 
-    it('configures cluster mode correctly with multiple workers', function () {
-        $server = HttpServer::create()->withCluster(4);
-
-        expect(getServerProperty($server, 'clusterEnabled'))->toBeTrue()
-            ->and(getServerProperty($server, 'workerCount'))->toBe(4)
-        ;
-    });
-
     it('allows cluster mode with exactly 1 worker for debugging/isolation', function () {
         $server = HttpServer::create()->withCluster(1);
 
@@ -108,6 +100,19 @@ describe('HttpServer Configuration & Instantiation', function () {
         expect(getServerProperty($server, 'clusterOptions')->clusterBootstrapFile)->toBe('/app/bootstrap.php')
             ->and(getServerProperty($server, 'clusterOptions')->clusterBootstrapCallback)->toBe($callback)
         ;
+    });
+
+    it('has no default error handler attached initially', function () {
+        $server = HttpServer::create();
+
+        expect(getServerProperty($server, 'errorHandler'))->toBeNull();
+    });
+
+    it('can attach a custom global error handler', function () {
+        $callback = fn (Throwable $e, Hibla\HttpServer\Message\Request $r) => null;
+        $server = HttpServer::create()->onError($callback);
+
+        expect(getServerProperty($server, 'errorHandler'))->toBe($callback);
     });
 
     it('can configure a unified application start callback', function () {

@@ -9,6 +9,7 @@ use Hibla\HttpServer\Exceptions\InvalidResponseException;
 use Hibla\HttpServer\Interfaces\ConnectionManagerInterface;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Socket\Interfaces\ConnectionInterface;
@@ -35,6 +36,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
     /**
      * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     * @param (callable(\Throwable, Request): (Response|null))|null $errorHandler
      */
     public function __construct(
         callable $requestHandler,
@@ -47,7 +49,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         private readonly ?float $keepAliveTimeout = null,
         private readonly int $maxConcurrentRequestsPerConnection = 128,
         private readonly int $maxUploadedFiles = 20,
-        private readonly int $maxFormFields = 1000
+        private readonly int $maxFormFields = 1000,
+        private readonly mixed $errorHandler = null
     ) {
         $this->requestHandler = $requestHandler;
     }
@@ -132,32 +135,19 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
                 if ($protocol->isUpgraded()) {
                     $item->response = null;
-                } elseif (! $response instanceof Response) {
+
+                    return;
+                }
+
+                if (! $response instanceof Response) {
                     throw new InvalidResponseException('Request handler must return an instance of Response');
-                } else {
-                    $body = $request->getBody();
-
-                    // SAFETY NET: If the user responded without fully consuming the incoming stream,
-                    // Immidiately close the TCP connection to prevent HTTP request smuggling / desync.
-                    if ($body instanceof \Hibla\HttpServer\Message\RequestBodyStream) {
-                        if ($body->isReadable() && ! $body->hasDataListener()) {
-                            $response->setHeader('Connection', 'close');
-                            $body->close();
-                        }
-                    } elseif ($body instanceof ReadableStreamInterface && $body->isReadable()) {
-                        $response->setHeader('Connection', 'close');
-                        $body->close();
-                    }
-
-                    $item->response = $response;
                 }
+
+                $this->enforceBodyConsumptionSafety($request, $response);
+
+                $item->response = $response;
             } catch (\Throwable $e) {
-                if (! $protocol->isUpgraded()) {
-                    $item->response = Response::plaintext("500 Internal Server Error\n" . $e->getMessage(), 500);
-                    $item->response->setHeader('Connection', 'close');
-                } else {
-                    $item->response = null;
-                }
+                $item->response = $protocol->isUpgraded() ? null : $this->resolveErrorResponse($e, $request);
             } finally {
                 $item->isReady = true;
                 $this->flushQueue();
@@ -165,6 +155,56 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         });
 
         Loop::addFiber($fiber);
+    }
+
+    private function resolveErrorResponse(\Throwable $e, Request $request): Response
+    {
+        if ($this->errorHandler === null) {
+            return $this->createFallbackErrorResponse($e);
+        }
+
+        try {
+            $customResponse = ($this->errorHandler)($e, $request);
+
+            if (! $customResponse instanceof Response) {
+                return $this->createFallbackErrorResponse(
+                    new InvalidResponseException('Custom error handler must return a Response object')
+                );
+            }
+
+            // Uncaught exceptions mean internal state/streams might be unstable.
+            // It is safer to forcefully close the connection to prevent smuggling or desyncs.
+            if (! $customResponse->hasHeader('Connection')) {
+                $customResponse->setHeader('Connection', 'close');
+            }
+
+            return $customResponse;
+        } catch (\Throwable $handlerException) {
+            return $this->createFallbackErrorResponse($handlerException);
+        }
+    }
+
+    private function createFallbackErrorResponse(\Throwable $e): Response
+    {
+        $response = Response::plaintext("500 Internal Server Error\n" . $e->getMessage(), 500);
+        $response->setHeader('Connection', 'close');
+
+        return $response;
+    }
+
+    private function enforceBodyConsumptionSafety(Request $request, Response $response): void
+    {
+        $body = $request->getBody();
+
+        if ($body instanceof RequestBodyStream) {
+            if ($body->isReadable() && ! $body->hasDataListener()) {
+                $response->setHeader('Connection', 'close');
+                $body->close();
+            }
+        } elseif ($body instanceof ReadableStreamInterface && $body->isReadable()) {
+            $response->setHeader('Connection', 'close');
+            $body->close();
+        }
     }
 
     private function flushQueue(): void
@@ -205,7 +245,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
                     $protocolHandler->writeResponse($head->response, $onComplete);
                 } catch (\Throwable $e) {
                     try {
-                        $errorResponse = Response::plaintext("500 Internal Server Error\n" . $e->getMessage(), 500);
+                        $errorResponse = $this->createFallbackErrorResponse($e);
                         $protocolHandler->writeResponse($errorResponse, $onComplete);
                     } catch (\Throwable) {
                         $connection->close();

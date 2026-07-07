@@ -1409,7 +1409,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $params['SSL_CIPHER'] = $meta['crypto']['cipher_name'] ?? null;
         }
 
-       if (isset($meta['wrapper_data']) && \is_array($meta['wrapper_data'])) {
+        if (isset($meta['wrapper_data']) && \is_array($meta['wrapper_data'])) {
             $wrapperData = $meta['wrapper_data'];
 
             if (isset($wrapperData['peer_certificate'])) {
@@ -1417,7 +1417,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
                 if (\is_string($peerCert) || $peerCert instanceof \OpenSSLCertificate) {
                     $certInfo = openssl_x509_parse($peerCert);
-                    
+
                     if (\is_array($certInfo) && isset($certInfo['name'])) {
                         $params['SSL_CLIENT_CERT_SUBJECT'] = $certInfo['name'];
                     }

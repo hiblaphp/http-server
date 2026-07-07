@@ -1009,7 +1009,8 @@ describe('Advanced Client-Server Interactions', function () {
                 ->and($response->json('target'))->toBe('s3://my-bucket/' . basename($localClientFile))
                 ->and($response->json('bytes_received'))->toBe(strlen($filePayload))
                 ->and($response->json('content_preview'))->toBe($filePayload)
-                ->and($response->json('album'))->toBe('vacation_2026');
+                ->and($response->json('album'))->toBe('vacation_2026')
+            ;
         } finally {
             if (file_exists($localClientFile)) {
                 unlink($localClientFile);
@@ -1017,4 +1018,127 @@ describe('Advanced Client-Server Interactions', function () {
             $socket->close();
         }
     });
+});
+
+describe('Application Exception Handling (onError)', function () {
+
+    it('returns a standard 500 Internal Server Error when no custom error handler is attached', function () {
+        [$socket, $url] = createTestServer(function (ServerRequest $request) {
+            throw new RuntimeException('Database connection failed');
+        });
+
+        try {
+            $response = await(Http::client()->get($url));
+
+            expect($response->status())->toBe(500)
+                ->and($response->body())->toContain('500 Internal Server Error')
+                ->and($response->body())->toContain('Database connection failed')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('allows a custom error handler to render a custom response', function () {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return ServerResponse::json([
+                'error' => true,
+                'message' => $e->getMessage(),
+                'path' => $request->getUri(),
+            ], 503);
+        };
+
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                throw new LogicException('Redis is down');
+            },
+            errorHandler: $errorHandler
+        );
+
+        try {
+            $response = await(Http::client()->get($url . '/test-error'));
+
+            expect($response->status())->toBe(503)
+                ->and($response->header('content-type'))->toBe('application/json')
+                ->and($response->json('error'))->toBeTrue()
+                ->and($response->json('message'))->toBe('Redis is down')
+                ->and($response->json('path'))->toBe('/test-error')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('falls back to the standard 500 error if the custom error handler itself throws an exception', function () {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            throw new RuntimeException('Error logger failed');
+        };
+
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                throw new LogicException('Initial application error');
+            },
+            errorHandler: $errorHandler
+        );
+
+        try {
+            $response = await(Http::client()->get($url));
+
+            expect($response->status())->toBe(500)
+                ->and($response->body())->toContain('500 Internal Server Error')
+                ->and($response->body())->toContain('Error logger failed')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('falls back to the standard 500 error if the custom error handler returns a non-Response object', function () {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return 'This is a string, not a Response object!';
+        };
+
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                throw new Exception('Oops');
+            },
+            errorHandler: $errorHandler
+        );
+
+        try {
+            $response = await(Http::client()->get($url));
+
+            expect($response->status())->toBe(500)
+                ->and($response->body())->toContain('500 Internal Server Error')
+                ->and($response->body())->toContain('Custom error handler must return a Response object')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
+    it('forcefully applies Connection: close to custom error responses to prevent state desynchronization', function () {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return ServerResponse::plaintext('Custom error page', 500);
+        };
+
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                throw new Exception('Oops');
+            },
+            errorHandler: $errorHandler
+        );
+
+        try {
+            $response = await(Http::client()->get($url));
+
+            expect($response->status())->toBe(500)
+                ->and($response->body())->toBe('Custom error page')
+                ->and(strtolower($response->header('connection')))->toBe('close')
+            ;
+        } finally {
+            $socket->close();
+        }
+    });
+
 });
