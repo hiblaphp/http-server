@@ -5,6 +5,10 @@ declare(strict_types=1);
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Message\SseStream;
 
+afterEach(function () {
+    Loop::reset();
+});
+
 it('starts as readable and unpaused', function () {
     $stream = new SseStream();
 
@@ -97,7 +101,6 @@ it('suspends the emitter fiber when the stream is paused to apply backpressure',
 
     $stream->pause();
 
-    // Manually start the fiber to control its execution progression
     $fiber->start();
 
     expect($fiber->isSuspended())->toBeTrue()
@@ -127,10 +130,6 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
         $stepReached = 3;
     });
 
-    $stream->on('close', function () {
-        Loop::stop();
-    });
-
     $fiber = getPrivateProperty($stream, 'emitterFiber');
 
     $stream->pause();
@@ -144,4 +143,27 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
     expect($fiber->isTerminated())->toBeTrue()
         ->and($stepReached)->toBe(3)
     ;
+
+    $stream->close();
+});
+
+it('does not forcefully resume a fiber suspended by application logic during stream resume', function () {
+    $stream = new SseStream(function (SseStream $stream) {
+        \Fiber::suspend();
+    });
+
+    $fiber = getPrivateProperty($stream, 'emitterFiber');
+
+    $fiber->start();
+
+    expect($fiber->isSuspended())->toBeTrue();
+
+    $stream->resume();
+
+    expect($fiber->isSuspended())->toBeTrue();
+
+    $fiber->resume();
+    expect($fiber->isTerminated())->toBeTrue();
+
+    $stream->close();
 });

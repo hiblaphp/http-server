@@ -17,6 +17,11 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
     private bool $paused = false;
 
     /**
+     * Tracks whether the Fiber was suspended specifically by TCP backpressure.
+     */
+    private bool $suspendedByBackpressure = false;
+
+    /**
      * @var \Fiber<mixed, mixed, mixed, mixed>|null The working fiber driving this stream
      */
     private ?\Fiber $emitterFiber = null;
@@ -55,7 +60,7 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
     {
         $this->paused = false;
 
-        if ($this->emitterFiber !== null && $this->emitterFiber->isSuspended()) {
+        if ($this->emitterFiber !== null && $this->suspendedByBackpressure) {
             Loop::scheduleFiber($this->emitterFiber);
         }
     }
@@ -76,7 +81,8 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
         $this->emit('close');
         $this->removeAllListeners();
 
-        if ($this->emitterFiber !== null && $this->emitterFiber->isSuspended()) {
+        // Only resume the Fiber if it was suspended due to backpressure!
+        if ($this->emitterFiber !== null && $this->suspendedByBackpressure) {
             Loop::scheduleFiber($this->emitterFiber);
         }
     }
@@ -93,7 +99,9 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
     public function send(string $data, ?string $event = null, ?string $id = null, ?int $retry = null): void
     {
         if ($this->paused && $this->emitterFiber !== null && \Fiber::getCurrent() === $this->emitterFiber) {
+            $this->suspendedByBackpressure = true; 
             \Fiber::suspend();
+            $this->suspendedByBackpressure = false; 
         }
 
         if (! $this->readable) {
