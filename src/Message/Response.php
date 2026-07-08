@@ -6,6 +6,7 @@ namespace Hibla\HttpServer\Message;
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\JsonEncodingException;
+use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
 use Hibla\Stream\Stream;
 
@@ -14,6 +15,11 @@ use Hibla\Stream\Stream;
  */
 class Response extends AbstractMessage
 {
+    /**
+     * @var callable(ConnectionInterface, string): void|null
+     */
+    public $upgradeCallback = null;
+
     /**
      * @var array<int, string> Map of standard HTTP status codes to reason phrases.
      */
@@ -96,6 +102,21 @@ class Response extends AbstractMessage
         $this->headers = $this->normalizeHeaders($headers);
         $this->body = $body;
         $this->protocolVersion = $protocolVersion;
+    }
+
+    /**
+     * Helper factory to upgrade the underlying TCP connection for protocols like WebSockets.
+     *
+     * @param int $status The HTTP status code (e.g., 101 for Switching Protocols).
+     * @param array<string, string|list<string>> $headers Headers to send before detaching.
+     * @param callable(ConnectionInterface, string): void $onUpgrade Callback executed with the raw connection and any trailing bytes.
+     */
+    public static function upgrade(int $status, array $headers, callable $onUpgrade): self
+    {
+        $response = new self($status, $headers, '');
+        $response->upgradeCallback = $onUpgrade(...);
+
+        return $response;
     }
 
     /**

@@ -326,6 +326,27 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         };
 
+        // PROTOCOL UPGRADE / HIJACK LOGIC 
+        if ($response->upgradeCallback !== null) {
+            $this->connection->write($headerBlock);
+            
+            $trailingBytes = $this->detach();
+            
+            $fiber = new \Fiber(function () use ($response, $trailingBytes) {
+                try {
+                    ($response->upgradeCallback)($this->connection, $trailingBytes);
+                } catch (\Throwable) {
+                    $this->connection->close();
+                }
+            });
+            
+            Loop::addFiber($fiber);
+            
+            $triggerComplete();
+            
+            return;
+        }
+
         if (\is_string($body)) {
             $this->writeStringResponse($headerBlock, $body, $shouldClose, $triggerComplete);
         } else {
