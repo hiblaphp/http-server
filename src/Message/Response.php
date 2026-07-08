@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Message;
 
-use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\JsonEncodingException;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -167,28 +166,12 @@ class Response extends AbstractMessage
      */
     public static function sse(callable $emitter): self
     {
-        $stream = new SseStream();
-
-        $fiber = new \Fiber(function () use ($emitter, $stream) {
-            try {
-                $emitter($stream);
-            } catch (\Throwable) {
-                // Connection dropping unwinds the fiber safely
-            } finally {
-                $stream->end();
-            }
-        });
-
-        $stream->setEmitterFiber($fiber);
-
-        Loop::addFiber($fiber);
-
         return new self(200, [
             'content-type' => 'text/event-stream',
             'cache-control' => 'no-cache',
             'connection' => 'keep-alive',
             'x-accel-buffering' => 'no',
-        ], $stream);
+        ], new SseStream($emitter));
     }
 
     /**

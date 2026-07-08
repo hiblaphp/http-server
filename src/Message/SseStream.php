@@ -21,22 +21,36 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
      */
     private ?\Fiber $emitterFiber = null;
 
+    /**
+     * @param (callable(self): void)|null $emitter Optional emitter callback that drives this SSE stream
+     */
+    public function __construct(?callable $emitter = null)
+    {
+        if ($emitter !== null) {
+            $this->emitterFiber = new \Fiber(function () use ($emitter) {
+                try {
+                    $emitter($this);
+                } catch (\Throwable) {
+                    // Connection dropping unwinds the fiber safely
+                } finally {
+                    $this->end();
+                }
+            });
+
+            Loop::addFiber($this->emitterFiber);
+        }
+    }
+
     public function isReadable(): bool
     {
         return $this->readable;
     }
 
-    /**
-     * Called by the ProtocolHandler/Socket when the TCP buffer is full.
-     */
     public function pause(): void
     {
         $this->paused = true;
     }
 
-    /**
-     * Called by the ProtocolHandler/Socket when the TCP buffer has drained.
-     */
     public function resume(): void
     {
         $this->paused = false;
@@ -76,10 +90,6 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
         $this->close();
     }
 
-    /**
-     * Safely formats and pushes an SSE message to the client.
-     * Applies backpressure by suspending the fiber if the stream is paused.
-     */
     public function send(string $data, ?string $event = null, ?string $id = null, ?int $retry = null): void
     {
         if ($this->paused && $this->emitterFiber !== null && \Fiber::getCurrent() === $this->emitterFiber) {
@@ -108,15 +118,5 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
         $payload .= "\n";
 
         $this->emit('data', [$payload]);
-    }
-
-    /**
-     * @internal Used by Response::sse() to register the working fiber.
-     *
-     * @param \Fiber<mixed, mixed, mixed, mixed> $fiber
-     */
-    public function setEmitterFiber(\Fiber $fiber): void
-    {
-        $this->emitterFiber = $fiber;
     }
 }

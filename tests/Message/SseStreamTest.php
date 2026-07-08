@@ -81,10 +81,9 @@ it('does not emit events once closed', function () {
 });
 
 it('suspends the emitter fiber when the stream is paused to apply backpressure', function () {
-    $stream = new SseStream();
     $stepReached = 0;
 
-    $fiber = new Fiber(function () use ($stream, &$stepReached) {
+    $stream = new SseStream(function (SseStream $stream) use (&$stepReached) {
         $stepReached = 1;
         $stream->send('First Event');
 
@@ -94,10 +93,11 @@ it('suspends the emitter fiber when the stream is paused to apply backpressure',
         $stepReached = 3;
     });
 
-    $stream->setEmitterFiber($fiber);
+    $fiber = getPrivateProperty($stream, 'emitterFiber');
 
     $stream->pause();
 
+    // Manually start the fiber to control its execution progression
     $fiber->start();
 
     expect($fiber->isSuspended())->toBeTrue()
@@ -115,10 +115,9 @@ it('suspends the emitter fiber when the stream is paused to apply backpressure',
 });
 
 it('integrates with the real Event Loop to schedule and resume suspended fibers automatically', function () {
-    $stream = new SseStream();
     $stepReached = 0;
 
-    $fiber = new Fiber(function () use ($stream, &$stepReached) {
+    $stream = new SseStream(function (SseStream $stream) use (&$stepReached) {
         $stepReached = 1;
         $stream->send('First Event');
 
@@ -128,14 +127,16 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
         $stepReached = 3;
     });
 
-    $stream->setEmitterFiber($fiber);
+    $stream->on('close', function () {
+        Loop::stop();
+    });
+
+    $fiber = getPrivateProperty($stream, 'emitterFiber');
 
     $stream->pause();
 
-    Loop::addFiber($fiber);
-
-    Loop::nextTick(function () use ($stream) {
-        $stream->resume(); // This internally calls Loop::scheduleFiber()
+    Loop::addTimer(0.01, function () use ($stream) {
+        $stream->resume();
     });
 
     Loop::run();
@@ -143,6 +144,4 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
     expect($fiber->isTerminated())->toBeTrue()
         ->and($stepReached)->toBe(3)
     ;
-
-    $stream->close();
 });
