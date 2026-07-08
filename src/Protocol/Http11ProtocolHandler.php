@@ -129,8 +129,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private bool $willCloseConnection = false;
 
-    private int $activeRequestsCount = 0;
-
     private int $state = self::STATE_HEADERS;
 
     private int $expectedBodyLength = 0;
@@ -160,6 +158,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     private ?string $requestTimerId = null;
 
     private ?string $keepAliveTimerId = null;
+
+    /**
+     * @inheritDoc
+     */
+    public private(set) int $activeRequestsCount = 0;
 
     /**
      * Callback triggered when the parser naturally responds with a 100 Continue.
@@ -198,7 +201,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * @param int $maxFormFields maximum number of array of bodys in a multipart request.
      */
     public function __construct(
-        private readonly ConnectionInterface $connection,
+        public private(set) ConnectionInterface $connection,
         private readonly mixed $onRequest,
         private readonly int $maxBodySize = 10485760,
         private readonly int $maxHeaderSize = 16384,
@@ -213,14 +216,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->handleConnectionCloseEvent();
         $this->startHeaderTimer();
         $this->startRequestTimer();
-    }
-
-    /**
-     * @inheritDoc
-     */
-    public function getConnection(): ConnectionInterface
-    {
-        return $this->connection;
     }
 
     /**

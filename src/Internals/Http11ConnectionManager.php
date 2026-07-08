@@ -125,7 +125,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         $this->pipelineQueue[] = $item;
 
         if (\count($this->pipelineQueue) >= $this->maxConcurrentRequestsPerConnection) {
-            $protocol->getConnection()->pause();
+            $protocol->connection->pause();
         }
 
         $fiber = new \Fiber(function () use ($request, $protocol, $item): void {
@@ -224,7 +224,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         }
 
         $this->isFlushing = true;
-        $connection = $protocolHandler->getConnection();
+        $connection = $protocolHandler->connection;
 
         $onComplete = function () use ($connection): void {
             array_shift($this->pipelineQueue);
