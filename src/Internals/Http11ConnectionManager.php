@@ -108,7 +108,11 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
      */
     public function getActiveRequestsCount(): int
     {
-        return $this->protocolHandler?->getActiveRequestsCount() ?? 0;
+        if ($this->protocolHandler === null) {
+            return 0;
+        }
+
+        return $this->protocolHandler->activeRequestsCount;
     }
 
     /**

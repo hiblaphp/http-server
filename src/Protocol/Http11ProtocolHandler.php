@@ -368,14 +368,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     }
 
     /**
-     * @inheritDoc
-     */
-    public function getActiveRequestsCount(): int
-    {
-        return $this->activeRequestsCount;
-    }
-
-    /**
      * {@inheritDoc}
      *
      * If the handler is currently processing a request, it will finish processing it,
@@ -512,9 +504,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bodyStream->on('pause', $this->connection->pause(...));
         $this->bodyStream->on('resume', $this->connection->resume(...));
         $request->body = $this->bodyStream;
-
-        // Expose configuration limit so Request helper methods know the configured max
-        $request->maxBodySize = $this->maxBodySize;
 
         // Trigger the user's application logic IMMEDIATELY
         $this->activeRequestsCount++;
@@ -766,11 +755,19 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->processFramingHeaders($headers, $protocolVersion, $forceClose);
 
         $serverParams = $this->getServerParams();
-        $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
 
-        $this->currentRequest->maxHeaderSize = $this->maxHeaderSize;
-        $this->currentRequest->maxUploadedFiles = $this->maxUploadedFiles;
-        $this->currentRequest->maxFormFields = $this->maxFormFields;
+        $this->currentRequest = new Request(
+            method: $method,
+            uri: $target,
+            headers: $headers,
+            body: '',
+            protocolVersion: $protocolVersion,
+            serverParams: $serverParams,
+            maxBodySize: $this->maxBodySize,
+            maxHeaderSize: $this->maxHeaderSize,
+            maxUploadedFiles: $this->maxUploadedFiles,
+            maxFormFields: $this->maxFormFields
+        );
 
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
     }

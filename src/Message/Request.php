@@ -26,26 +26,6 @@ class Request extends AbstractMessage
     use DeletesFilesSafely;
 
     /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxBodySize = 10485760;
-
-    /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxHeaderSize = 16384;
-
-    /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxUploadedFiles = 20;
-
-    /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxFormFields = 1000;
-
-    /**
      * Used to memoize the buffered body so multiple calls don't exhaust the stream.
      */
     private ?string $cachedBody = null;
@@ -67,6 +47,10 @@ class Request extends AbstractMessage
      * @param string|ReadableStreamInterface $body
      * @param string $protocolVersion
      * @param array<string, mixed> $serverParams
+     * @param int $maxBodySize Internal limit for body buffering
+     * @param int $maxHeaderSize Internal limit for multipart header parsing
+     * @param int $maxUploadedFiles Internal limit for multipart files
+     * @param int $maxFormFields Internal limit for multipart fields
      */
     public function __construct(
         public private(set) string $method,
@@ -74,7 +58,11 @@ class Request extends AbstractMessage
         array $headers = [],
         string|ReadableStreamInterface $body = '',
         string $protocolVersion = '1.1',
-        public private(set) array $serverParams = []
+        public private(set) array $serverParams = [],
+        private int $maxBodySize = 10485760,
+        private int $maxHeaderSize = 16384,
+        private int $maxUploadedFiles = 20,
+        private int $maxFormFields = 1000
     ) {
         $this->headers = $this->normalizeHeaders($headers);
         $this->body = $body;

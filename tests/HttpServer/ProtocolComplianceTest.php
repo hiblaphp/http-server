@@ -150,7 +150,7 @@ describe('Protocol Compliance & Advanced Features', function () {
                 $response = new ServerResponse(101, ['Upgrade' => 'echo', 'Connection' => 'Upgrade']);
                 $protocol->writeResponse($response);
 
-                $connection = $protocol->getConnection();
+                $connection = $protocol->connection;
                 $protocol->detach();
 
                 $connection->on('data', function (string $chunk) use ($connection) {
@@ -197,7 +197,7 @@ describe('Protocol Compliance & Advanced Features', function () {
                 $response = new ServerResponse(200, [], '');
                 $protocol->writeResponse($response);
 
-                $connection = $protocol->getConnection();
+                $connection = $protocol->connection;
                 $protocol->detach();
 
                 $connection->on('data', fn ($chunk) => $connection->write('Proxied: ' . $chunk));
