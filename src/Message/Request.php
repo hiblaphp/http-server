@@ -10,6 +10,7 @@ use Hibla\HttpServer\Exceptions\MessageParsingException;
 use Hibla\HttpServer\Exceptions\MultipartException;
 use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Exceptions\StreamTransferException;
+use Hibla\HttpServer\Internals\MultipartParser;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
