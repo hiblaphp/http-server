@@ -184,7 +184,7 @@ interface HttpServerInterface
     /**
      * Register the primary request handler for the HTTP server.
      *
-     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     * @param callable(Request): (Response|null) $requestHandler
      *
      * @return static
      */
