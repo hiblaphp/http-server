@@ -6,7 +6,7 @@ namespace Tests\Message;
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
-use Hibla\HttpServer\Message\MultipartParser;
+use Hibla\HttpServer\Internals\MultipartParser;
 use Hibla\Promise\Promise;
 
 use function Hibla\await;

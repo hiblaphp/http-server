@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hibla\HttpServer\Message;
+namespace Hibla\HttpServer\Internals;
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\StreamClosedException;

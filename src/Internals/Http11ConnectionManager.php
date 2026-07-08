@@ -9,7 +9,7 @@ use Hibla\HttpServer\Exceptions\InvalidResponseException;
 use Hibla\HttpServer\Interfaces\ConnectionManagerInterface;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\RequestBodyStream;
+use Hibla\HttpServer\Internals\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Socket\Interfaces\ConnectionInterface;

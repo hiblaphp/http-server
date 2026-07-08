@@ -6,7 +6,7 @@ namespace Tests\Message;
 
 use Evenement\EventEmitter;
 use Hibla\EventLoop\Loop;
-use Hibla\HttpServer\Message\MultipartFileStream;
+use Hibla\HttpServer\Internals\MultiPartFileStream;
 use Hibla\Promise\Exceptions\CancelledException;
 use Hibla\Stream\Interfaces\WritableStreamInterface;
 

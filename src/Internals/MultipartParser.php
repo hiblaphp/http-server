@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hibla\HttpServer\Message;
+namespace Hibla\HttpServer\Internals;
 
 use Evenement\EventEmitter;
 use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
@@ -10,6 +10,8 @@ use Hibla\Stream\Interfaces\WritableStreamInterface;
 use Hibla\Stream\ThroughStream;
 
 /**
+ * @internal 
+ * 
  * High-performance, streaming multipart/form-data parser.
  * Operates purely in-memory with a bounded sliding window.
  */

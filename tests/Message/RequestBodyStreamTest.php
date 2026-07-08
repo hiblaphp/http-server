@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Evenement\EventEmitter;
-use Hibla\HttpServer\Message\RequestBodyStream;
+use Hibla\HttpServer\Internals\RequestBodyStream;
 use Hibla\Stream\Interfaces\WritableStreamInterface;
 
 it('starts in a readable and unpaused state', function () {

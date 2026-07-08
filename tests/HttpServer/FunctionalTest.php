@@ -7,7 +7,7 @@ use Hibla\HttpClient\Http;
 use Hibla\HttpClient\SSE\SSEControl;
 use Hibla\HttpClient\SSE\SSEEvent as ClientSseEvent;
 use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
-use Hibla\HttpServer\Message\MultipartParser;
+use Hibla\HttpServer\Internals\MultipartParser;
 use Hibla\HttpServer\Message\Request as ServerRequest;
 use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\HttpServer\Message\SseStream as ServerSseStream;

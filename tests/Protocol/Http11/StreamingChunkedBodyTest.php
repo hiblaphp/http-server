@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\RequestBodyStream;
+use Hibla\HttpServer\Internals\RequestBodyStream;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 
 describe('Streaming — Chunked partial read: basic delivery', function () {
