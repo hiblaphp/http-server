@@ -221,9 +221,9 @@ describe('Pipelined chunked requests — state machine reset between requests', 
         $handler->handleData($raw);
 
         expect($parsedRequests)->toHaveCount(2)
-            ->and($parsedRequests[0]->getUri())->toBe('/first')
+            ->and($parsedRequests[0]->uri)->toBe('/first')
             ->and(await($parsedRequests[0]->getBufferedBody()))->toBe('abc')
-            ->and($parsedRequests[1]->getUri())->toBe('/second')
+            ->and($parsedRequests[1]->uri)->toBe('/second')
             ->and(await($parsedRequests[1]->getBufferedBody()))->toBe('hello')
         ;
     });
@@ -265,7 +265,7 @@ describe('HTTP/1.0 edge cases', function () {
         $handler->handleData("GET / HTTP/1.0\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getProtocolVersion())->toBe('1.0')
+            ->and($parsedRequest->protocolVersion)->toBe('1.0')
         ;
     });
 
@@ -332,8 +332,8 @@ describe('Request-line edge cases', function () {
         $handler->handleData("OPTIONS * HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getMethod())->toBe('OPTIONS')
-            ->and($parsedRequest->getUri())->toBe('*')
+            ->and($parsedRequest->method)->toBe('OPTIONS')
+            ->and($parsedRequest->uri)->toBe('*')
         ;
     });
 
@@ -349,7 +349,7 @@ describe('Request-line edge cases', function () {
         $handler->handleData("GET /search?q=hello+world&page=2 HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getUri())->toBe('/search?q=hello+world&page=2')
+            ->and($parsedRequest->uri)->toBe('/search?q=hello+world&page=2')
         ;
     });
 
@@ -365,7 +365,7 @@ describe('Request-line edge cases', function () {
         $handler->handleData("PURGE /cache HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getMethod())->toBe('PURGE')
+            ->and($parsedRequest->method)->toBe('PURGE')
         ;
     });
 });

@@ -335,7 +335,7 @@ describe('Server Configuration Integration Tests', function () {
                 HttpServer::create($address)
                     ->withoutLogging()
                     ->onRequest(function (Request $request) {
-                        $body = $request->getBody();
+                        $body = $request->body;
                         $isStream = $body instanceof ReadableStreamInterface;
 
                         return Response::plaintext($isStream ? 'STREAM_DETECTED' : 'STRING_DETECTED');
@@ -362,7 +362,7 @@ describe('Clustered Mode Advanced Integration Tests', function () {
                     ->withCluster(1)
                     ->withoutLogging()
                     ->onRequest(function (Request $request) {
-                        if ($request->getUri() === '/suicide') {
+                        if ($request->uri === '/suicide') {
                             exit(1);
                         }
 
@@ -403,7 +403,7 @@ describe('Clustered Mode Advanced Integration Tests', function () {
                     ->withCluster(1, $options)
                     ->withoutLogging()
                     ->onRequest(function (Request $request) {
-                        if ($request->getUri() === '/bloat') {
+                        if ($request->uri === '/bloat') {
                             $data = str_repeat('X', 30 * 1024 * 1024);
 
                             return Response::plaintext('Bloated to ' . strlen($data));

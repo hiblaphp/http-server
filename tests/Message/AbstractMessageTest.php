@@ -8,10 +8,10 @@ use Tests\Fixtures\ConcreteMessage;
 it('handles body mutations correctly', function () {
     $message = new ConcreteMessage(body: 'Original Body');
 
-    expect($message->getBody())->toBe('Original Body');
+    expect($message->body)->toBe('Original Body');
 
     $message->setBody('Updated Body');
-    expect($message->getBody())->toBe('Updated Body');
+    expect($message->body)->toBe('Updated Body');
 });
 
 it('accepts and retrieves stream objects as body', function () {
@@ -20,15 +20,15 @@ it('accepts and retrieves stream objects as body', function () {
 
     $message->setBody($streamMock);
 
-    expect($message->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
-        ->and($message->getBody())->toBe($streamMock)
+    expect($message->body)->toBeInstanceOf(ReadableStreamInterface::class)
+        ->and($message->body)->toBe($streamMock)
     ;
 });
 
 it('manages protocol versions', function () {
     $message = new ConcreteMessage(protocolVersion: '2.0');
 
-    expect($message->getProtocolVersion())->toBe('2.0');
+    expect($message->protocolVersion)->toBe('2.0');
 });
 
 it('performs case-insensitive header lookups', function () {

@@ -298,13 +298,13 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         // optimistically-pipelined data from being parsed as subsequent HTTP requests.
         if (
             $this->currentRequest !== null
-            && $this->currentRequest->getMethod() === 'CONNECT'
-            && $response->getStatusCode() >= 400
+            && $this->currentRequest->method === 'CONNECT'
+            && $response->statusCode >= 400
         ) {
             $this->willCloseConnection = true;
         }
 
-        $body = $response->getBody();
+        $body = $response->body;
         $isStreamingOut = ! \is_string($body);
         $isChunkedResponse = false;
         $shouldClose = false;
@@ -970,9 +970,9 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function compileResponseHeaders(Response $response, bool $isStreamingOut, bool &$isChunkedResponse, bool &$shouldClose): string
     {
-        $version = $response->getProtocolVersion() === '1.1' ? $this->activeResponseVersion : $response->getProtocolVersion();
-        $headers = $response->getHeaders();
-        $body = $response->getBody();
+        $version = $response->protocolVersion === '1.1' ? $this->activeResponseVersion : $response->protocolVersion;
+        $headers = $response->headers;
+        $body = $response->body;
 
         if (! isset($headers['server'])) {
             $headers['server'] = ['Hibla/1.0'];
@@ -981,7 +981,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         if ($isStreamingOut && ! isset($headers['content-length'])) {
             $isChunkedResponse = true;
             $headers['transfer-encoding'] = ['chunked'];
-        } elseif (! $isStreamingOut && ! isset($headers['content-length']) && $response->getStatusCode() !== 101) {
+        } elseif (! $isStreamingOut && ! isset($headers['content-length']) && $response->statusCode !== 101) {
             $headers['content-length'] = [(string) \strlen(\is_string($body) ? $body : '')];
         }
 
@@ -993,7 +993,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $headers['connection'] = ['keep-alive'];
         }
 
-        $lines = ["HTTP/{$version} {$response->getStatusCode()} {$response->getReasonPhrase()}"];
+        $lines = ["HTTP/{$version} {$response->statusCode} {$response->reasonPhrase}"];
 
         foreach ($headers as $name => $values) {
             $displayName = self::formatHeaderNameForWire($name);

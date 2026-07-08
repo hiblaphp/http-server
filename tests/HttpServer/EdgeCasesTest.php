@@ -43,7 +43,7 @@ describe('Protocol Edge Cases', function () {
 
     it('processes diverse standard and custom HTTP methods safely', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext("Method used: {$request->getMethod()}");
+            return ServerResponse::plaintext("Method used: {$request->method}");
         });
 
         try {
@@ -68,7 +68,7 @@ describe('Protocol Edge Cases', function () {
 
     it('downgrades to HTTP/1.0 and closes the connection if requested by the client', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('Protocol: ' . $request->getProtocolVersion());
+            return ServerResponse::plaintext('Protocol: ' . $request->protocolVersion);
         });
 
         try {
@@ -163,7 +163,7 @@ describe('Protocol Edge Cases', function () {
 
     it('correctly accepts and parses absolute URIs in the request line', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext($request->getUri());
+            return ServerResponse::plaintext($request->uri);
         });
 
         try {
@@ -256,7 +256,7 @@ describe('Protocol Edge Cases', function () {
 
     it('supports true HTTP/1.1 Pipelining (multiple requests sent in a single write)', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext($request->getUri());
+            return ServerResponse::plaintext($request->uri);
         });
 
         try {
@@ -312,7 +312,7 @@ describe('Protocol Edge Cases', function () {
 
     it('preserves relative paths and traversal characters verbatim in the request target', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext($request->getUri());
+            return ServerResponse::plaintext($request->uri);
         });
 
         try {
@@ -342,7 +342,7 @@ describe('Protocol Edge Cases', function () {
 
     it('accepts and preserves query strings containing empty parameters', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext($request->getUri());
+            return ServerResponse::plaintext($request->uri);
         });
 
         try {
@@ -399,7 +399,7 @@ describe('Protocol Edge Cases', function () {
         });
 
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $stream = $request->getBody();
+            $stream = $request->body;
 
             $stream->on('close', function () {
                 if (isset($GLOBALS['resolveUploadFail'])) {

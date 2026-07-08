@@ -21,7 +21,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('uses its own socket address for the URI when no Host header is present on HTTP/1.0', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext((string) $request->getUri());
+            return ServerResponse::plaintext((string) $request->uri);
         });
 
         try {
@@ -86,7 +86,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('gives precedence to the Host header for URI construction', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext((string) $request->getUri());
+            return ServerResponse::plaintext((string) $request->uri);
         });
 
         try {
@@ -103,7 +103,7 @@ describe('Protocol Compliance & Advanced Features', function () {
             'tls' => ['local_cert' => __DIR__ . '/../Fixtures/localhost.pem'],
         ];
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::json(['secure' => true, 'uri' => (string) $request->getUri()]);
+            return ServerResponse::json(['secure' => true, 'uri' => (string) $request->uri]);
         }, context: $context);
 
         try {
@@ -193,7 +193,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('handles HTTP CONNECT requests for tunneling', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request, ProtocolHandlerInterface $protocol) {
-            if ($request->getMethod() === 'CONNECT') {
+            if ($request->method === 'CONNECT') {
                 $response = new ServerResponse(200, [], '');
                 $protocol->writeResponse($response);
 
@@ -231,7 +231,7 @@ describe('Protocol Compliance & Advanced Features', function () {
         $closeEventFired = new Promise(fn($res) => $GLOBALS['resolveClose'] = $res);
 
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $request->getBody()->on('close', fn() => $GLOBALS['resolveClose'](true));
+            $request->body->on('close', fn() => $GLOBALS['resolveClose'](true));
         });
 
         try {
@@ -328,7 +328,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('supports multiple sequential requests on the same TCP connection (HTTP/1.1 Keep-Alive)', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('Path: ' . $request->getUri());
+            return ServerResponse::plaintext('Path: ' . $request->uri);
         });
 
         try {

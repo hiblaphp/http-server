@@ -28,10 +28,10 @@ it('parses a basic GET request with no body', function () {
     $handler->handleData($raw);
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getMethod())->toBe('GET')
-        ->and($parsedRequest->getUri())->toBe('/index.html?page=2')
+        ->and($parsedRequest->method)->toBe('GET')
+        ->and($parsedRequest->uri)->toBe('/index.html?page=2')
         ->and($parsedRequest->getHeaderLine('host'))->toBe('localhost')
-        ->and($parsedRequest->getProtocolVersion())->toBe('1.1')
+        ->and($parsedRequest->protocolVersion)->toBe('1.1')
         ->and(await($parsedRequest->getBufferedBody()))->toBe('')
     ;
 });
@@ -174,10 +174,10 @@ it('handles pipelined requests sequentially in a single TCP stream payload', fun
     $handler->handleData($rawPayload);
 
     expect($parsedRequests)->toHaveCount(2)
-        ->and($parsedRequests[0]->getMethod())->toBe('GET')
-        ->and($parsedRequests[0]->getUri())->toBe('/first-page')
-        ->and($parsedRequests[1]->getMethod())->toBe('POST')
-        ->and($parsedRequests[1]->getUri())->toBe('/second-page')
+        ->and($parsedRequests[0]->method)->toBe('GET')
+        ->and($parsedRequests[0]->uri)->toBe('/first-page')
+        ->and($parsedRequests[1]->method)->toBe('POST')
+        ->and($parsedRequests[1]->uri)->toBe('/second-page')
         ->and(await($parsedRequests[1]->getBufferedBody()))->toBe('body')
     ;
 });
@@ -196,11 +196,11 @@ it('triggers onRequest immediately when streamingRequests is enabled, then pipes
     $handler->handleData("POST /stream-endpoint HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
 
     expect($parsedRequest)->not->toBeNull()
-        ->and($parsedRequest->getBody())->toBeInstanceOf(RequestBodyStream::class)
+        ->and($parsedRequest->body)->toBeInstanceOf(RequestBodyStream::class)
     ;
 
     $streamedData = '';
-    $parsedRequest->getBody()->on('data', function (string $chunk) use (&$streamedData) {
+    $parsedRequest->body->on('data', function (string $chunk) use (&$streamedData) {
         $streamedData .= $chunk;
     });
 

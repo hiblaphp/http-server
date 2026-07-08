@@ -18,7 +18,7 @@ class Response extends AbstractMessage
     /**
      * @var callable(ConnectionInterface, string): void|null
      */
-    public $upgradeCallback = null;
+    public private(set) mixed $upgradeCallback = null;
 
     /**
      * @var array<int, string> Map of standard HTTP status codes to reason phrases.
@@ -89,10 +89,10 @@ class Response extends AbstractMessage
      * @param string $protocolVersion
      */
     public function __construct(
-        public int $statusCode = 200,
+        public private(set) int $statusCode = 200,
         array $headers = [],
         string|ReadableStreamInterface $body = '',
-        public string $reasonPhrase = '',
+        public private(set) string $reasonPhrase = '',
         string $protocolVersion = '1.1'
     ) {
         if ($this->reasonPhrase === '') {
@@ -271,26 +271,6 @@ class Response extends AbstractMessage
             headers: [...$responseHeaders, ...$headers],
             body: $stream->pipe($limiter)
         );
-    }
-
-    /**
-     * Retrieves the HTTP status code of the response (e.g., 200, 404).
-     *
-     * @return int The status code.
-     */
-    public function getStatusCode(): int
-    {
-        return $this->statusCode;
-    }
-
-    /**
-     * Retrieves the HTTP reason phrase associated with the status code (e.g., "OK", "Not Found").
-     *
-     * @return string The reason phrase.
-     */
-    public function getReasonPhrase(): string
-    {
-        return $this->reasonPhrase;
     }
 
     /**

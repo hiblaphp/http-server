@@ -19,7 +19,7 @@ describe('RFC 9931 Section 8 — Requirements for HTTP CONNECT', function () {
         $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) use (&$parsedRequests) {
             $parsedRequests[] = $request;
 
-            if ($request->getMethod() === 'CONNECT') {
+            if ($request->method === 'CONNECT') {
                 $protocol->writeResponse(new Response(403, [], 'Forbidden'));
             }
         });
@@ -34,7 +34,7 @@ describe('RFC 9931 Section 8 — Requirements for HTTP CONNECT', function () {
         $handler->handleData($raw);
         expect($buffer)->toContain('Connection: close');
         ! expect($parsedRequests)->toHaveCount(1)
-                    ->and($parsedRequests[0]->getMethod())->toBe('CONNECT')
+                    ->and($parsedRequests[0]->method)->toBe('CONNECT')
         ;
     });
 

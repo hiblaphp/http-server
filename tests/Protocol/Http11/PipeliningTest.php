@@ -27,7 +27,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $manager = new Http11ConnectionManager(
             function (Request $request) {
-                if ($request->getUri() === '/slow') {
+                if ($request->uri === '/slow') {
                     await(delay(0.04));
 
                     return Response::plaintext('Slow Response');
@@ -75,7 +75,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $manager = new Http11ConnectionManager(
             function (Request $request) use (&$deferreds) {
-                $uri = $request->getUri();
+                $uri = $request->uri;
 
                 return await(new Promise(function ($resolve) use (&$deferreds, $uri) {
                     $deferreds[$uri] = $resolve;
@@ -117,7 +117,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $manager = new Http11ConnectionManager(
             function (Request $request) {
-                if ($request->getUri() === '/error') {
+                if ($request->uri === '/error') {
                     throw new RuntimeException('Intentional Error');
                 }
 
@@ -151,16 +151,16 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $manager = new Http11ConnectionManager(
             function (Request $request, ProtocolHandlerInterface $protocol) use (&$processedRequests) {
-                $processedRequests[] = $request->getUri();
+                $processedRequests[] = $request->uri;
 
-                if ($request->getUri() === '/upgrade') {
+                if ($request->uri === '/upgrade') {
                     $protocol->writeResponse(new Response(101, ['Upgrade' => 'websocket', 'Connection' => 'Upgrade']));
                     $protocol->detach();
 
                     return null;
                 }
 
-                return Response::plaintext('Handled: ' . $request->getUri());
+                return Response::plaintext('Handled: ' . $request->uri);
             }
         );
 
@@ -193,7 +193,7 @@ describe('HTTP/1.1 Pipelining (RFC 9112 section 9.3) Compliance', function () {
 
         $manager = new Http11ConnectionManager(
             function (Request $request) {
-                if ($request->getUri() === '/hanging') {
+                if ($request->uri === '/hanging') {
                     await(delay(0.05));
 
                     return Response::plaintext('Aborted Response');

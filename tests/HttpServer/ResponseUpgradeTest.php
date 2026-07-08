@@ -51,11 +51,11 @@ describe('Response::upgrade() API Edge Cases', function () {
 
     it('processes standard pipelined HTTP requests completely before executing the socket upgrade', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getUri() === '/api/data') {
+            if ($request->uri === '/api/data') {
                 return ServerResponse::plaintext('Standard API JSON');
             }
 
-            if ($request->getUri() === '/ws') {
+            if ($request->uri === '/ws') {
                 return ServerResponse::upgrade(101, ['Upgrade' => 'websocket'], function ($connection, $trailing) {
                     $connection->end("Socket is now hijacked!");
                 });
@@ -130,7 +130,7 @@ describe('Response::upgrade() API Edge Cases', function () {
 
     it('can be used to ergonomically build an HTTP CONNECT tunnel', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getMethod() === 'CONNECT') {
+            if ($request->method === 'CONNECT') {
                 return ServerResponse::upgrade(200, [], function ($connection, $trailingBytes) {
                     $connection->write("TUNNEL_ESTABLISHED\n");
                     if ($trailingBytes !== '') {

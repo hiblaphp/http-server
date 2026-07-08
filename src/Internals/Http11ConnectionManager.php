@@ -198,7 +198,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
     private function enforceBodyConsumptionSafety(Request $request, Response $response): void
     {
-        $body = $request->getBody();
+        $body = $request->body;
 
         if ($body instanceof RequestBodyStream) {
             if ($body->isReadable() && ! $body->hasDataListener()) {

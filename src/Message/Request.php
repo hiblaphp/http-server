@@ -59,42 +59,16 @@ class Request extends AbstractMessage
      * @param array<string, mixed> $serverParams
      */
     public function __construct(
-        public string $method,
-        public string $uri,
+        public private(set) string $method,
+        public private(set) string $uri,
         array $headers = [],
         string|ReadableStreamInterface $body = '',
         string $protocolVersion = '1.1',
-        public array $serverParams = []
+        public private(set) array $serverParams = []
     ) {
         $this->headers = $this->normalizeHeaders($headers);
         $this->body = $body;
         $this->protocolVersion = $protocolVersion;
-    }
-
-    /**
-     * Retrieves the HTTP method of the request (e.g., "GET", "POST").
-     */
-    public function getMethod(): string
-    {
-        return $this->method;
-    }
-
-    /**
-     * Retrieves the request URI or path.
-     */
-    public function getUri(): string
-    {
-        return $this->uri;
-    }
-
-    /**
-     * Retrieves server-side environment parameters.
-     *
-     * @return array<string, mixed>
-     */
-    public function getServerParams(): array
-    {
-        return $this->serverParams;
     }
 
     /**
@@ -110,7 +84,7 @@ class Request extends AbstractMessage
             return Promise::resolved($this->cachedBody);
         }
 
-        $body = $this->getBody();
+        $body = $this->body;
         if (\is_string($body)) {
             $this->cachedBody = $body;
 
@@ -313,7 +287,7 @@ class Request extends AbstractMessage
                 $writePromises[] = $writePromise;
             });
 
-            $body = $this->getBody();
+            $body = $this->body;
             $isStream = $body instanceof ReadableStreamInterface;
 
             /** @var Promise<null> $parserPromise */
@@ -389,7 +363,7 @@ class Request extends AbstractMessage
         }
 
         $boundary = $matches[1] !== '' ? $matches[1] : $matches[2];
-        $body = $this->getBody();
+        $body = $this->body;
 
         /** @var Promise<void> */
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
