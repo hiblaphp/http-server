@@ -51,6 +51,16 @@ class Request extends AbstractMessage
     private ?string $cachedBody = null;
 
     /**
+     * For incoming Requests from the server, this is always a ReadableStreamInterface.
+     */
+    public string|ReadableStreamInterface $body {
+        set {
+            $this->cachedBody = null;
+            $this->body = $value;
+        }
+    }
+
+    /**
      * @param string $method
      * @param string $uri
      * @param array<string, string|list<string>> $headers

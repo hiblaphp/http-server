@@ -11,7 +11,7 @@ use Hibla\Stream\Interfaces\WritableStreamInterface;
 use Hibla\Stream\Util;
 
 /**
- * @internal 
+ * @internal
  */
 class RequestBodyStream extends EventEmitter implements ReadableStreamInterface
 {

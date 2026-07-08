@@ -85,8 +85,9 @@ it('creates json responses via factory', function () {
 it('throws an exception on invalid json data', function () {
     $resource = fopen('php://memory', 'r');
 
-    expect(fn() => Response::json($resource))
-        ->toThrow(JsonEncodingException::class, 'Unable to encode given data as JSON');
+    expect(fn () => Response::json($resource))
+        ->toThrow(JsonEncodingException::class, 'Unable to encode given data as JSON')
+    ;
 });
 
 it('creates html responses via factory', function () {
@@ -148,7 +149,7 @@ it('can accept a readable stream as a response body', function () {
     $dummyStream = Mockery::mock(ReadableStreamInterface::class);
 
     $response = new Response();
-    $response->setBody($dummyStream);
+    $response->body = $dummyStream;
 
     expect($response->body)->toBeInstanceOf(ReadableStreamInterface::class)
         ->and($response->body)->toBe($dummyStream)
@@ -242,7 +243,7 @@ describe('Response::file', function () {
 
         $fp = fopen($tempFile, 'wb');
 
-        $oneMegabyteChunk = str_repeat('a', 1024 * 1024); 
+        $oneMegabyteChunk = str_repeat('a', 1024 * 1024);
 
         for ($i = 0; $i < 100; $i++) {
             fwrite($fp, $oneMegabyteChunk);
@@ -253,12 +254,13 @@ describe('Response::file', function () {
         if (function_exists('memory_reset_peak_usage')) {
             memory_reset_peak_usage();
         }
-        
+
         $startPeakMemory = memory_get_peak_usage();
 
         $response = Response::file($tempFile);
         expect($response->statusCode)->toBe(200)
-            ->and($response->getHeaderLine('Content-Length'))->toBe('104857600'); 
+            ->and($response->getHeaderLine('Content-Length'))->toBe('104857600')
+        ;
 
         $bytesRead = 0;
 

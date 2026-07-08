@@ -1021,10 +1021,10 @@ describe('Advanced Client-Server Interactions', function () {
 });
 
 describe('Application Exception Handling (onError)', function () {
-    
+
     it('returns a standard 500 Internal Server Error when no custom error handler is attached', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            throw new \RuntimeException('Database connection failed');
+            throw new RuntimeException('Database connection failed');
         });
 
         try {
@@ -1040,17 +1040,17 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('allows a custom error handler to render a custom response', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
             return ServerResponse::json([
                 'error' => true,
                 'message' => $e->getMessage(),
-                'path' => $request->uri
+                'path' => $request->uri,
             ], 503);
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \LogicException('Redis is down');
+                throw new LogicException('Redis is down');
             },
             errorHandler: $errorHandler
         );
@@ -1070,13 +1070,13 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('falls back to the standard 500 error retaining the original exception if the custom handler returns null', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
             return null;
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \RuntimeException('Original Database Error');
+                throw new RuntimeException('Original Database Error');
             },
             errorHandler: $errorHandler
         );
@@ -1095,14 +1095,14 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('falls back to the standard 500 error if the custom error handler itself throws an exception', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
             // Oh no, the error logger is also broken!
-            throw new \RuntimeException('Error logger failed');
+            throw new RuntimeException('Error logger failed');
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \LogicException('Initial application error');
+                throw new LogicException('Initial application error');
             },
             errorHandler: $errorHandler
         );
@@ -1120,13 +1120,13 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('falls back to the standard 500 error if the custom error handler returns a non-Response object', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
-            return "This is a string, not a Response object!";
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return 'This is a string, not a Response object!';
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \Exception('Oops');
+                throw new Exception('Oops');
             },
             errorHandler: $errorHandler
         );
@@ -1144,13 +1144,13 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('forcefully applies Connection: close to custom error responses to prevent state desynchronization', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
-            return ServerResponse::plaintext("Custom error page", 500);
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return ServerResponse::plaintext('Custom error page', 500);
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \Exception('Oops');
+                throw new Exception('Oops');
             },
             errorHandler: $errorHandler
         );

@@ -10,8 +10,8 @@ use Hibla\Stream\Interfaces\WritableStreamInterface;
 use Hibla\Stream\ThroughStream;
 
 /**
- * @internal 
- * 
+ * @internal
+ *
  * High-performance, streaming multipart/form-data parser.
  * Operates purely in-memory with a bounded sliding window.
  */

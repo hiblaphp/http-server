@@ -10,7 +10,7 @@ it('handles body mutations correctly', function () {
 
     expect($message->body)->toBe('Original Body');
 
-    $message->setBody('Updated Body');
+    $message->body = 'Updated Body';
     expect($message->body)->toBe('Updated Body');
 });
 
@@ -18,7 +18,7 @@ it('accepts and retrieves stream objects as body', function () {
     $streamMock = Mockery::mock(ReadableStreamInterface::class);
     $message = new ConcreteMessage();
 
-    $message->setBody($streamMock);
+    $message->body = $streamMock;
 
     expect($message->body)->toBeInstanceOf(ReadableStreamInterface::class)
         ->and($message->body)->toBe($streamMock)

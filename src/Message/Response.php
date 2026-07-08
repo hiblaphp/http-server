@@ -205,7 +205,7 @@ class Response extends AbstractMessage
             return self::plaintext('File Not Found', 404);
         }
 
-        $fileSize = filesize($path);
+        $fileSize = (int) filesize($path);
         $contentType = self::detectMimeType($path);
         $stream = Stream::readableFile($path);
 
@@ -266,10 +266,12 @@ class Response extends AbstractMessage
         $responseHeaders['content-length'] = (string) $contentLength;
         $responseHeaders['content-range'] = "bytes {$start}-{$end}/{$fileSize}";
 
+        $stream->pipe($limiter);
+
         return new self(
             statusCode: 206,
             headers: [...$responseHeaders, ...$headers],
-            body: $stream->pipe($limiter)
+            body: $limiter
         );
     }
 

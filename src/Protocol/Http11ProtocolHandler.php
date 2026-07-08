@@ -11,8 +11,8 @@ use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Exceptions\RequestHeaderFieldsTooLargeException;
 use Hibla\HttpServer\Exceptions\UnsupportedTransferCodingException;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
-use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Internals\RequestBodyStream;
+use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -326,12 +326,12 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         };
 
-        // PROTOCOL UPGRADE / HIJACK LOGIC 
+        // PROTOCOL UPGRADE / HIJACK LOGIC
         if ($response->upgradeCallback !== null) {
             $this->connection->write($headerBlock);
-            
+
             $trailingBytes = $this->detach();
-            
+
             $fiber = new \Fiber(function () use ($response, $trailingBytes) {
                 try {
                     ($response->upgradeCallback)($this->connection, $trailingBytes);
@@ -339,11 +339,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                     $this->connection->close();
                 }
             });
-            
+
             Loop::addFiber($fiber);
-            
+
             $triggerComplete();
-            
+
             return;
         }
 
@@ -516,7 +516,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bodyStream = new RequestBodyStream();
         $this->bodyStream->on('pause', $this->connection->pause(...));
         $this->bodyStream->on('resume', $this->connection->resume(...));
-        $request->setBody($this->bodyStream);
+        $request->body = $this->bodyStream;
 
         // Expose configuration limit so Request helper methods know the configured max
         $request->maxBodySize = $this->maxBodySize;

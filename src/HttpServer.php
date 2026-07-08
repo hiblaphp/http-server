@@ -8,17 +8,17 @@ use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\InvalidConfigurationException;
 use Hibla\HttpServer\Interfaces\ConnectionManagerInterface;
 use Hibla\HttpServer\Interfaces\HttpServerInterface;
+use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Internals\Http11ConnectionManager;
 use Hibla\HttpServer\Internals\ServerWorkerTask;
+use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
 use Hibla\Parallel\ProcessPool;
 use Hibla\Parallel\ValueObjects\WorkerMessage;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\Interfaces\ServerInterface;
 use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
-use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\Response;
-use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 
 use function Hibla\asyncFn;
 
@@ -586,7 +586,8 @@ final class HttpServer implements HttpServerInterface
                 ) {
                     $this->log("[Worker {$message->pid}] {$data['message']}");
                 }
-            });
+            })
+        ;
 
         $options = $this->clusterOptions;
 

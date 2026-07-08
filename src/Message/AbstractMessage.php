@@ -17,16 +17,16 @@ abstract class AbstractMessage
     public protected(set) array $headers = [];
 
     /**
+     * @var string The HTTP protocol version
+     */
+    public protected(set) string $protocolVersion = '1.1';
+
+    /**
      * @var string|ReadableStreamInterface The message body payload.
      *                                     For incoming Requests from the server, this is always a ReadableStreamInterface.
      *                                     For outgoing Responses, this is typically a string, but can be a stream.
      */
-    public protected(set) string|ReadableStreamInterface $body = '';
-
-    /**
-     * @var string The HTTP protocol version
-     */
-    public protected(set) string $protocolVersion = '1.1';
+    public string|ReadableStreamInterface $body = '';
 
     /**
      * Retrieves a specific header's values as a list of strings.
@@ -96,16 +96,6 @@ abstract class AbstractMessage
             ...($this->headers[$normalizedName] ?? []),
             ...$values,
         ];
-    }
-
-    /**
-     * Sets or updates the message body payload.
-     * 
-     * Mutated internally by the Server Protocol Handler
-     */
-    public function setBody(string|ReadableStreamInterface $body): void
-    {
-        $this->body = $body;
     }
 
     /**

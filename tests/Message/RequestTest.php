@@ -73,7 +73,7 @@ it('can mutate the body payload', function () {
 
     expect($request->body)->toBe('');
 
-    $request->setBody('New Payload');
+    $request->body = 'New Payload';
     expect($request->body)->toBe('New Payload');
 });
 
@@ -110,7 +110,7 @@ it('can accept a readable stream object as the body', function () {
     $dummyStream = Mockery::mock(ReadableStreamInterface::class);
 
     $request = new Request('POST', '/');
-    $request->setBody($dummyStream);
+    $request->body = $dummyStream;
 
     expect($request->body)->toBeInstanceOf(ReadableStreamInterface::class)
         ->and($request->body)->toBe($dummyStream)
@@ -541,6 +541,5 @@ it('cleans up stream listeners, closes the stream, and discards future bytes on 
     expect($bodyStream->isReadable())->toBeFalse();
 
     expect(fn () => await($promise))
-        ->toThrow(CancelledException::class)
-    ;
+        ->toThrow(CancelledException::class);
 });
