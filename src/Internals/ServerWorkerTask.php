@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Hibla\HttpServer\Internals;
 
 use Hibla\EventLoop\Loop;
-use Hibla\HttpServer\HttpServer;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
@@ -87,7 +86,7 @@ final class ServerWorkerTask
             );
         }
 
-        $triggerShutdown = HttpServer::attachProtocolHandler(
+        $triggerShutdown = ProtocolAttacher::attach(
             $socket,
             $this->requestHandler,
             $this->maxBodySize,

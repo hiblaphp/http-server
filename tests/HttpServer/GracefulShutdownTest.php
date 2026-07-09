@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Hibla\HttpClient\Http;
-use Hibla\HttpServer\HttpServer;
+use Hibla\HttpServer\Internals\ProtocolAttacher;
 use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\Promise\Promise;
 use Hibla\Socket\Connector;
@@ -20,7 +20,7 @@ describe('Server-level Graceful Draining', function () {
 
         $responseReceived = false;
 
-        $triggerShutdown = HttpServer::attachProtocolHandler($socket, function () {
+        $triggerShutdown = ProtocolAttacher::attach($socket, function () {
             await(delay(0.2));
 
             return ServerResponse::plaintext('Completed safely!');
@@ -53,7 +53,7 @@ describe('Server-level Graceful Draining', function () {
         $chunksReceived = [];
         $stream = new ThroughStream();
 
-        $triggerShutdown = HttpServer::attachProtocolHandler($socket, function () use ($stream) {
+        $triggerShutdown = ProtocolAttacher::attach($socket, function () use ($stream) {
             return new ServerResponse(200, [], $stream);
         });
 
@@ -86,7 +86,7 @@ describe('Server-level Graceful Draining', function () {
         $socket = new SocketServer('tcp://127.0.0.1:0');
         $url = str_replace('tcp://', 'http://', $socket->getAddress());
 
-        $triggerShutdown = HttpServer::attachProtocolHandler($socket, function () {
+        $triggerShutdown = ProtocolAttacher::attach($socket, function () {
             return ServerResponse::plaintext('OK');
         });
 
@@ -128,7 +128,7 @@ describe('Server-level Graceful Draining', function () {
         $socket = new SocketServer('tcp://127.0.0.1:0');
         $url = str_replace('tcp://', 'http://', $socket->getAddress());
 
-        $triggerShutdown = HttpServer::attachProtocolHandler($socket, function (Hibla\HttpServer\Message\Request $request, Hibla\HttpServer\Interfaces\ProtocolHandlerInterface $protocol) {
+        $triggerShutdown = ProtocolAttacher::attach($socket, function (Hibla\HttpServer\Message\Request $request, Hibla\HttpServer\Interfaces\ProtocolHandlerInterface $protocol) {
             if ($request->getHeaderLine('Upgrade') === 'websocket') {
                 $protocol->writeResponse(new ServerResponse(101, ['Upgrade' => 'websocket', 'Connection' => 'Upgrade']));
                 $protocol->detach();

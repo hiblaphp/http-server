@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Hibla\HttpServer\HttpServer;
+use Hibla\HttpServer\Internals\ProtocolAttacher;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\SocketServer;
 
@@ -215,7 +216,7 @@ function createTestServer(
     $scheme = isset($context['tls']) ? 'tls://' : 'tcp://';
     $socket = new SocketServer($scheme . '127.0.0.1:0', $context);
 
-    HttpServer::attachProtocolHandler(
+    ProtocolAttacher::attach(
         $socket,
         $requestHandler,
         $maxBodySize,

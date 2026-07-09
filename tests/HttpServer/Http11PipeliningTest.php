@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use Hibla\EventLoop\Loop;
-use Hibla\HttpServer\HttpServer;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
+use Hibla\HttpServer\Internals\ProtocolAttacher;
 use Hibla\HttpServer\Message\Request as ServerRequest;
 use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\Promise\Promise;
@@ -84,7 +84,7 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
 
         $deferreds = [];
 
-        HttpServer::attachProtocolHandler(
+        ProtocolAttacher::attach(
             $socket,
             function (ServerRequest $request) use (&$deferreds) {
                 $uri = $request->uri;

@@ -6,16 +6,14 @@ namespace Hibla\HttpServer;
 
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\InvalidConfigurationException;
-use Hibla\HttpServer\Interfaces\ConnectionManagerInterface;
 use Hibla\HttpServer\Interfaces\HttpServerInterface;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
-use Hibla\HttpServer\Internals\Http11ConnectionManager;
+use Hibla\HttpServer\Internals\ProtocolAttacher;
 use Hibla\HttpServer\Internals\ServerWorkerTask;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\Parallel\ProcessPool;
 use Hibla\Parallel\ValueObjects\WorkerMessage;
-use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Socket\Interfaces\ServerInterface;
 use Hibla\Socket\LimitingServer;
 use Hibla\Socket\SocketServer;
@@ -467,7 +465,7 @@ final class HttpServer implements HttpServerInterface
             return;
         }
 
-        $triggerShutdown = self::attachProtocolHandler(
+        $triggerShutdown = ProtocolAttacher::attach(
             $this->customSocketServer,
             $requestHandler,
             $this->maxBodySize,
@@ -523,7 +521,7 @@ final class HttpServer implements HttpServerInterface
             );
         }
 
-        $triggerShutdown = self::attachProtocolHandler(
+        $triggerShutdown = ProtocolAttacher::attach(
             $socket,
             $requestHandler,
             $this->maxBodySize,
@@ -723,91 +721,5 @@ final class HttpServer implements HttpServerInterface
         $display = str_replace('tcp://', 'http://', $this->uri);
 
         return str_replace('tls://', 'https://', $display);
-    }
-
-    /**
-     * @internal This is for internal usage and testing purposes.
-     *
-     * @return callable():int A callback that triggers graceful shutdown and returns the active connection count.
-     */
-    public static function attachProtocolHandler(
-        ServerInterface $socket,
-        callable $requestHandler,
-        int $maxBodySize = 10485760,
-        int $maxHeaderSize = 8192,
-        int $maxHeaderCount = 100,
-        ?float $headerTimeout = null,
-        ?float $bodyTimeout = null,
-        ?float $requestTimeout = null,
-        ?float $keepAliveTimeout = null,
-        int $maxConcurrentRequestsPerConnection = 128,
-        int $maxUploadedFiles = 20,
-        int $maxFormFields = 1000,
-        ?callable $errorHandler = null,
-        ?callable $onClientDisconnect = null,
-        ?int $keepAliveMaxRequests = null
-    ): callable {
-        /** @var array<int, ConnectionManagerInterface> $activeManagers */
-        $activeManagers = [];
-
-        $socket->on('connection', static function (ConnectionInterface $connection) use (
-            $requestHandler,
-            $maxBodySize,
-            $maxHeaderSize,
-            $maxHeaderCount,
-            $headerTimeout,
-            $bodyTimeout,
-            $requestTimeout,
-            $keepAliveTimeout,
-            $maxConcurrentRequestsPerConnection,
-            &$activeManagers,
-            $maxUploadedFiles,
-            $maxFormFields,
-            $errorHandler,
-            $onClientDisconnect,
-            $keepAliveMaxRequests,
-        ): void {
-
-            $manager = new Http11ConnectionManager(
-                $requestHandler,
-                $maxBodySize,
-                $maxHeaderSize,
-                $maxHeaderCount,
-                $headerTimeout,
-                $bodyTimeout,
-                $requestTimeout,
-                $keepAliveTimeout,
-                $maxConcurrentRequestsPerConnection,
-                $maxUploadedFiles,
-                $maxFormFields,
-                $errorHandler,
-                $onClientDisconnect,
-                $keepAliveMaxRequests
-            );
-
-            $managerId = spl_object_id($manager);
-            $activeManagers[$managerId] = $manager;
-
-            $connection->on('close', static function () use ($managerId, &$activeManagers): void {
-                unset($activeManagers[$managerId]);
-            });
-
-            $manager->handle($connection);
-        });
-
-        return static function () use (&$activeManagers): int {
-            $count = 0;
-
-            foreach ($activeManagers as $manager) {
-                if ($manager->isUpgraded()) {
-                    continue;
-                }
-
-                $manager->gracefulShutdown();
-                $count += $manager->getActiveRequestsCount();
-            }
-
-            return $count;
-        };
     }
 }
