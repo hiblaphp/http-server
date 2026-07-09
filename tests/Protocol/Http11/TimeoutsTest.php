@@ -297,7 +297,7 @@ describe('Timeout Edge Cases', function () {
         $handler = new Http11ProtocolHandler(
             $connection,
             function (Request $request, ProtocolHandlerInterface $protocol) {
-                $protocol->writeResponse(new Response(200, [], 'Processed: ' . $request->getUri()));
+                $protocol->writeResponse(new Response(200, [], 'Processed: ' . $request->uri));
             },
             keepAliveTimeout: 0.3
         );
@@ -323,7 +323,7 @@ describe('Timeout Edge Cases', function () {
         $handler = new Http11ProtocolHandler(
             $connection,
             function (Request $request, ProtocolHandlerInterface $protocol) {
-                $body = $request->getBody();
+                $body = $request->body;
                 $total = 0;
                 $body->on('data', function ($chunk) use (&$total) {
                     $total += strlen($chunk);

@@ -15,11 +15,37 @@ function debug(string $message): void
     fwrite(STDERR, "[DEBUG] {$message}\n");
 }
 
+function getPrivateProperty(object $object, string $property): mixed
+{
+    $reflector = new ReflectionObject($object);
+
+    try {
+        $prop = $reflector->getProperty($property);
+
+        return $prop->getValue($object);
+    } catch (ReflectionException) {
+        $parent = $reflector->getParentClass();
+        while ($parent !== false) {
+            try {
+                $prop = $parent->getProperty($property);
+
+                return $prop->getValue($object);
+            } catch (ReflectionException) {
+                $parent = $parent->getParentClass();
+            }
+        }
+    }
+
+    throw new InvalidArgumentException(sprintf(
+        'Property "%s" does not exist on class %s or any of its parents.',
+        $property,
+        $object::class
+    ));
+}
+
 function getServerProperty(HttpServer $server, string $property): mixed
 {
-    $reflection = new ReflectionClass($server);
-
-    return $reflection->getProperty($property)->getValue($server);
+    return getPrivateProperty($server, $property);
 }
 
 function mockConnection(

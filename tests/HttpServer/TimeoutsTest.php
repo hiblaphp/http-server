@@ -122,7 +122,7 @@ describe('Timeout Edge Cases', function () {
 
     it('safely handles instant pipelined requests without triggering the keep-alive timeout', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return new ServerResponse(200, [], 'Processed: ' . $request->getUri());
+            return new ServerResponse(200, [], 'Processed: ' . $request->uri);
         }, keepAliveTimeout: 0.3);
 
         try {
@@ -201,7 +201,7 @@ describe('Timeout Edge Cases', function () {
 
     it('does not trigger header timeout during a slow streaming request body upload', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $body = $request->getBody();
+            $body = $request->body;
             $deferred = new Promise(function ($resolve) use ($body) {
                 $total = 0;
                 $body->on('data', function ($chunk) use (&$total) {

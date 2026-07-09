@@ -453,7 +453,7 @@ describe('Header Field Security — Size and Count limits', function () {
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and(count($parsedRequest->getHeaders()))->toBe(5)
+            ->and(count($parsedRequest->headers))->toBe(5)
         ;
     });
 
@@ -716,7 +716,7 @@ describe('HTTP Version — Grammar edge cases', function () {
         $handler->handleData("GET / HTTP/0.9\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getProtocolVersion())->toBe('0.9')
+            ->and($parsedRequest->protocolVersion)->toBe('0.9')
         ;
     });
 
@@ -732,7 +732,7 @@ describe('HTTP Version — Grammar edge cases', function () {
         $handler->handleData("GET / HTTP/9.9\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getProtocolVersion())->toBe('9.9')
+            ->and($parsedRequest->protocolVersion)->toBe('9.9')
         ;
     });
 
@@ -771,7 +771,7 @@ describe('HTTP/1.0 — Specific compliance', function () {
         $handler->handleData("GET / HTTP/1.0\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getProtocolVersion())->toBe('1.0')
+            ->and($parsedRequest->protocolVersion)->toBe('1.0')
         ;
     });
 
@@ -818,7 +818,7 @@ describe('GET with body — Framing correctness', function () {
         $handler->handleData($raw);
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getMethod())->toBe('GET')
+            ->and($parsedRequest->method)->toBe('GET')
             ->and(await($parsedRequest->getBufferedBody()))->toBe('body')
         ;
     });
@@ -844,8 +844,8 @@ describe('GET with body — Framing correctness', function () {
         $handler->handleData($raw);
 
         expect($parsedRequests)->toHaveCount(2)
-            ->and($parsedRequests[0]->getUri())->toBe('/first')
-            ->and($parsedRequests[1]->getUri())->toBe('/second')
+            ->and($parsedRequests[0]->uri)->toBe('/first')
+            ->and($parsedRequests[1]->uri)->toBe('/second')
         ;
     });
 });

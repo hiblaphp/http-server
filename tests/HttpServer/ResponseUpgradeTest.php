@@ -1,4 +1,4 @@
-<?php 
+<?php
 
 declare(strict_types=1);
 
@@ -51,13 +51,13 @@ describe('Response::upgrade() API Edge Cases', function () {
 
     it('processes standard pipelined HTTP requests completely before executing the socket upgrade', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getUri() === '/api/data') {
+            if ($request->uri === '/api/data') {
                 return ServerResponse::plaintext('Standard API JSON');
             }
 
-            if ($request->getUri() === '/ws') {
+            if ($request->uri === '/ws') {
                 return ServerResponse::upgrade(101, ['Upgrade' => 'websocket'], function ($connection, $trailing) {
-                    $connection->end("Socket is now hijacked!");
+                    $connection->end('Socket is now hijacked!');
                 });
             }
 
@@ -103,7 +103,7 @@ describe('Response::upgrade() API Edge Cases', function () {
     it('safely closes the socket if the onUpgrade callback throws an exception inside its isolated Fiber', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
             return ServerResponse::upgrade(101, ['Upgrade' => 'custom'], function ($connection, $trailing) {
-                throw new \RuntimeException('Fatal error establishing WebSocket session!');
+                throw new RuntimeException('Fatal error establishing WebSocket session!');
             });
         });
 
@@ -120,9 +120,9 @@ describe('Response::upgrade() API Edge Cases', function () {
             });
 
             $wasClosed = await($closedPromise);
-            
+
             expect($wasClosed)->toBeTrue();
-            
+
         } finally {
             $socket->close();
         }
@@ -130,15 +130,16 @@ describe('Response::upgrade() API Edge Cases', function () {
 
     it('can be used to ergonomically build an HTTP CONNECT tunnel', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getMethod() === 'CONNECT') {
+            if ($request->method === 'CONNECT') {
                 return ServerResponse::upgrade(200, [], function ($connection, $trailingBytes) {
                     $connection->write("TUNNEL_ESTABLISHED\n");
                     if ($trailingBytes !== '') {
-                        $connection->write("PROXIED: " . $trailingBytes);
+                        $connection->write('PROXIED: ' . $trailingBytes);
                     }
-                    $connection->on('data', fn ($chunk) => $connection->write("PROXIED: " . $chunk));
+                    $connection->on('data', fn ($chunk) => $connection->write('PROXIED: ' . $chunk));
                 });
             }
+
             return new ServerResponse(405);
         });
 
@@ -164,7 +165,7 @@ describe('Response::upgrade() API Edge Cases', function () {
                 ->and($rawResponse)->toContain('TUNNEL_ESTABLISHED')
                 ->and($rawResponse)->toContain('PROXIED: EARLY_SSL_HELLO')
             ;
-            
+
             $connection->close();
         } finally {
             $socket->close();

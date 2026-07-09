@@ -10,6 +10,7 @@ use Hibla\HttpServer\Exceptions\MessageParsingException;
 use Hibla\HttpServer\Exceptions\MultipartException;
 use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Exceptions\StreamTransferException;
+use Hibla\HttpServer\Internals\MultipartParser;
 use Hibla\HttpServer\Traits\DeletesFilesSafely;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
@@ -25,29 +26,19 @@ class Request extends AbstractMessage
     use DeletesFilesSafely;
 
     /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxBodySize = 10485760;
-
-    /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxHeaderSize = 16384;
-
-    /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxUploadedFiles = 20;
-
-    /**
-     * @internal Inherited from the HTTP Server configuration
-     */
-    public int $maxFormFields = 1000;
-
-    /**
      * Used to memoize the buffered body so multiple calls don't exhaust the stream.
      */
     private ?string $cachedBody = null;
+
+    /**
+     * For incoming Requests from the server, this is always a ReadableStreamInterface.
+     */
+    public string|ReadableStreamInterface $body {
+        set {
+            $this->cachedBody = null;
+            $this->body = $value;
+        }
+    }
 
     /**
      * @param string $method
@@ -56,44 +47,26 @@ class Request extends AbstractMessage
      * @param string|ReadableStreamInterface $body
      * @param string $protocolVersion
      * @param array<string, mixed> $serverParams
+     * @param int $maxBodySize Internal limit for body buffering
+     * @param int $maxHeaderSize Internal limit for multipart header parsing
+     * @param int $maxUploadedFiles Internal limit for multipart files
+     * @param int $maxFormFields Internal limit for multipart fields
      */
     public function __construct(
-        public string $method,
-        public string $uri,
+        public private(set) string $method,
+        public private(set) string $uri,
         array $headers = [],
         string|ReadableStreamInterface $body = '',
         string $protocolVersion = '1.1',
-        public array $serverParams = []
+        public private(set) array $serverParams = [],
+        private int $maxBodySize = 10485760,
+        private int $maxHeaderSize = 16384,
+        private int $maxUploadedFiles = 20,
+        private int $maxFormFields = 1000
     ) {
         $this->headers = $this->normalizeHeaders($headers);
         $this->body = $body;
         $this->protocolVersion = $protocolVersion;
-    }
-
-    /**
-     * Retrieves the HTTP method of the request (e.g., "GET", "POST").
-     */
-    public function getMethod(): string
-    {
-        return $this->method;
-    }
-
-    /**
-     * Retrieves the request URI or path.
-     */
-    public function getUri(): string
-    {
-        return $this->uri;
-    }
-
-    /**
-     * Retrieves server-side environment parameters.
-     *
-     * @return array<string, mixed>
-     */
-    public function getServerParams(): array
-    {
-        return $this->serverParams;
     }
 
     /**
@@ -109,7 +82,7 @@ class Request extends AbstractMessage
             return Promise::resolved($this->cachedBody);
         }
 
-        $body = $this->getBody();
+        $body = $this->body;
         if (\is_string($body)) {
             $this->cachedBody = $body;
 
@@ -312,7 +285,7 @@ class Request extends AbstractMessage
                 $writePromises[] = $writePromise;
             });
 
-            $body = $this->getBody();
+            $body = $this->body;
             $isStream = $body instanceof ReadableStreamInterface;
 
             /** @var Promise<null> $parserPromise */
@@ -388,7 +361,7 @@ class Request extends AbstractMessage
         }
 
         $boundary = $matches[1] !== '' ? $matches[1] : $matches[2];
-        $body = $this->getBody();
+        $body = $this->body;
 
         /** @var Promise<void> */
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {

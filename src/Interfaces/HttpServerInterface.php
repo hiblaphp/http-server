@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Hibla\HttpServer\Interfaces;
 
 use Hibla\HttpServer\ClusterOptions;
+use Hibla\HttpServer\Exceptions\InvalidConfigurationException;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ServerInterface;
-use Hibla\HttpServer\Exceptions\InvalidConfigurationException;
 
 /**
  * Defines the contract for the high-level HTTP Server.
@@ -229,6 +229,7 @@ interface HttpServerInterface
      * Start the HTTP Server and block the current thread to process incoming requests.
      *
      * @return void
+     *
      * @throws InvalidConfigurationException If no request handler is set.
      */
     public function start(): void;

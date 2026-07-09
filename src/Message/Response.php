@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Message;
 
-use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Exceptions\JsonEncodingException;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -18,7 +17,7 @@ class Response extends AbstractMessage
     /**
      * @var callable(ConnectionInterface, string): void|null
      */
-    public $upgradeCallback = null;
+    public private(set) mixed $upgradeCallback = null;
 
     /**
      * @var array<int, string> Map of standard HTTP status codes to reason phrases.
@@ -89,10 +88,10 @@ class Response extends AbstractMessage
      * @param string $protocolVersion
      */
     public function __construct(
-        public int $statusCode = 200,
+        public private(set) int $statusCode = 200,
         array $headers = [],
         string|ReadableStreamInterface $body = '',
-        public string $reasonPhrase = '',
+        public private(set) string $reasonPhrase = '',
         string $protocolVersion = '1.1'
     ) {
         if ($this->reasonPhrase === '') {
@@ -167,28 +166,12 @@ class Response extends AbstractMessage
      */
     public static function sse(callable $emitter): self
     {
-        $stream = new SseStream();
-
-        $fiber = new \Fiber(function () use ($emitter, $stream) {
-            try {
-                $emitter($stream);
-            } catch (\Throwable) {
-                // Connection dropping unwinds the fiber safely
-            } finally {
-                $stream->end();
-            }
-        });
-
-        $stream->setEmitterFiber($fiber);
-
-        Loop::addFiber($fiber);
-
         return new self(200, [
             'content-type' => 'text/event-stream',
             'cache-control' => 'no-cache',
             'connection' => 'keep-alive',
             'x-accel-buffering' => 'no',
-        ], $stream);
+        ], new SseStream($emitter));
     }
 
     /**
@@ -205,7 +188,7 @@ class Response extends AbstractMessage
             return self::plaintext('File Not Found', 404);
         }
 
-        $fileSize = filesize($path);
+        $fileSize = (int) filesize($path);
         $contentType = self::detectMimeType($path);
         $stream = Stream::readableFile($path);
 
@@ -266,31 +249,13 @@ class Response extends AbstractMessage
         $responseHeaders['content-length'] = (string) $contentLength;
         $responseHeaders['content-range'] = "bytes {$start}-{$end}/{$fileSize}";
 
+        $stream->pipe($limiter);
+
         return new self(
             statusCode: 206,
             headers: [...$responseHeaders, ...$headers],
-            body: $stream->pipe($limiter)
+            body: $limiter
         );
-    }
-
-    /**
-     * Retrieves the HTTP status code of the response (e.g., 200, 404).
-     *
-     * @return int The status code.
-     */
-    public function getStatusCode(): int
-    {
-        return $this->statusCode;
-    }
-
-    /**
-     * Retrieves the HTTP reason phrase associated with the status code (e.g., "OK", "Not Found").
-     *
-     * @return string The reason phrase.
-     */
-    public function getReasonPhrase(): string
-    {
-        return $this->reasonPhrase;
     }
 
     /**

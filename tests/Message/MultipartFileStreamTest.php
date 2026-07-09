@@ -6,7 +6,7 @@ namespace Tests\Message;
 
 use Evenement\EventEmitter;
 use Hibla\EventLoop\Loop;
-use Hibla\HttpServer\Message\MultipartFileStream;
+use Hibla\HttpServer\Internals\MultiPartFileStream;
 use Hibla\Promise\Exceptions\CancelledException;
 use Hibla\Stream\Interfaces\WritableStreamInterface;
 
@@ -19,7 +19,7 @@ afterEach(function () {
 
 describe('Event-driven API', function () {
     it('buffers writes before a data listener is attached and flushes them on next microtask when added', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
         $emittedData = '';
         $ended = false;
 
@@ -44,7 +44,7 @@ describe('Event-driven API', function () {
     });
 
     it('passes data through immediately without any buffering if a listener is already attached', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
         $emittedData = '';
         $ended = false;
 
@@ -65,7 +65,7 @@ describe('Event-driven API', function () {
     });
 
     it('handles late pipe() attachments perfectly without losing a single byte of data', function () {
-        $source = new MultipartFileStream();
+        $source = new MultiPartFileStream();
 
         $destination = new class () extends EventEmitter implements WritableStreamInterface {
             public string $buffer = '';
@@ -112,7 +112,7 @@ describe('Event-driven API', function () {
     });
 
     it('guarantees sequential data order when writes occur both before and after attaching the listener', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
         $emittedData = '';
 
         $stream->write('chunk_1_');
@@ -132,7 +132,7 @@ describe('Event-driven API', function () {
     });
 
     it('discards all buffered data and ignores subsequent writes if the stream is closed early', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
         $emittedData = '';
         $ended = false;
 
@@ -157,7 +157,7 @@ describe('Event-driven API', function () {
     });
 
     it('ignores empty string writes without triggering anomalies or unexpected flushes', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
         $emittedData = '';
 
         $stream->write('');
@@ -178,7 +178,7 @@ describe('Event-driven API', function () {
 describe('Promise-based API', function () {
 
     it('resolves readAsync() with buffered data and future data', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
 
         $stream->write('part1_');
 
@@ -199,7 +199,7 @@ describe('Promise-based API', function () {
     });
 
     it('resolves readLineAsync() with correct line boundaries', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
 
         Loop::addTimer(0.01, function () use ($stream) {
             $stream->write("Line 1\nLine ");
@@ -223,7 +223,7 @@ describe('Promise-based API', function () {
     });
 
     it('resolves readAllAsync() with all data when the stream ends', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
 
         $stream->write('Hello');
 
@@ -239,7 +239,7 @@ describe('Promise-based API', function () {
     });
 
     it('pipes data asynchronously via pipeAsync() and resolves with total byte count', function () {
-        $source = new MultipartFileStream();
+        $source = new MultiPartFileStream();
 
         $destination = new class () extends EventEmitter implements WritableStreamInterface {
             public string $buffer = '';
@@ -295,7 +295,7 @@ describe('Promise-based API', function () {
 describe('Promise Cancellation', function () {
 
     it('cancels readAsync() and leaves subsequent bytes safely in the buffer', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
 
         $promise = $stream->readAsync(1024);
 
@@ -320,7 +320,7 @@ describe('Promise Cancellation', function () {
     });
 
     it('cancels readAllAsync() mid-stream and preserves future unread bytes', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
 
         $stream->write('chunk_1_');
 
@@ -349,7 +349,7 @@ describe('Promise Cancellation', function () {
     });
 
     it('cancels pipeAsync() safely, stops transferring data immediately, and leaves destination open', function () {
-        $source = new MultipartFileStream();
+        $source = new MultiPartFileStream();
 
         $bytesReceived = 0;
         $destination = new class ($bytesReceived) extends EventEmitter implements WritableStreamInterface {
@@ -423,7 +423,7 @@ describe('Promise Cancellation', function () {
     });
 
     it('rejects pending reads if the stream is closed abruptly', function () {
-        $stream = new MultipartFileStream();
+        $stream = new MultiPartFileStream();
 
         $promise = $stream->readAsync();
 

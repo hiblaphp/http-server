@@ -30,11 +30,11 @@ it('correctly assigns and retrieves constructor values', function () {
         serverParams: ['REMOTE_ADDR' => '127.0.0.1']
     );
 
-    expect($request->getMethod())->toBe('POST')
-        ->and($request->getUri())->toBe('/api/users')
-        ->and($request->getProtocolVersion())->toBe('1.0')
-        ->and($request->getBody())->toBe('{"name": "John"}')
-        ->and($request->getServerParams())->toBe(['REMOTE_ADDR' => '127.0.0.1'])
+    expect($request->method)->toBe('POST')
+        ->and($request->uri)->toBe('/api/users')
+        ->and($request->protocolVersion)->toBe('1.0')
+        ->and($request->body)->toBe('{"name": "John"}')
+        ->and($request->serverParams)->toBe(['REMOTE_ADDR' => '127.0.0.1'])
     ;
 });
 
@@ -71,10 +71,10 @@ it('formats header lines correctly', function () {
 it('can mutate the body payload', function () {
     $request = new Request('GET', '/');
 
-    expect($request->getBody())->toBe('');
+    expect($request->body)->toBe('');
 
-    $request->setBody('New Payload');
-    expect($request->getBody())->toBe('New Payload');
+    $request->body = 'New Payload';
+    expect($request->body)->toBe('New Payload');
 });
 
 it('combines multiple header values properly in getHeaderLine', function () {
@@ -110,10 +110,10 @@ it('can accept a readable stream object as the body', function () {
     $dummyStream = Mockery::mock(ReadableStreamInterface::class);
 
     $request = new Request('POST', '/');
-    $request->setBody($dummyStream);
+    $request->body = $dummyStream;
 
-    expect($request->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
-        ->and($request->getBody())->toBe($dummyStream)
+    expect($request->body)->toBeInstanceOf(ReadableStreamInterface::class)
+        ->and($request->body)->toBe($dummyStream)
     ;
 });
 
@@ -541,6 +541,5 @@ it('cleans up stream listeners, closes the stream, and discards future bytes on 
     expect($bodyStream->isReadable())->toBeFalse();
 
     expect(fn () => await($promise))
-        ->toThrow(CancelledException::class)
-    ;
+        ->toThrow(CancelledException::class);
 });

@@ -11,8 +11,8 @@ use Hibla\HttpServer\Exceptions\PayloadTooLargeException;
 use Hibla\HttpServer\Exceptions\RequestHeaderFieldsTooLargeException;
 use Hibla\HttpServer\Exceptions\UnsupportedTransferCodingException;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
+use Hibla\HttpServer\Internals\RequestBodyStream;
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\Socket\Interfaces\ConnectionInterface;
 use Hibla\Stream\Interfaces\ReadableStreamInterface;
@@ -129,8 +129,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private bool $willCloseConnection = false;
 
-    private int $activeRequestsCount = 0;
-
     private int $state = self::STATE_HEADERS;
 
     private int $expectedBodyLength = 0;
@@ -160,6 +158,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     private ?string $requestTimerId = null;
 
     private ?string $keepAliveTimerId = null;
+
+    /**
+     * @inheritDoc
+     */
+    public private(set) int $activeRequestsCount = 0;
 
     /**
      * Callback triggered when the parser naturally responds with a 100 Continue.
@@ -198,7 +201,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * @param int $maxFormFields maximum number of array of bodys in a multipart request.
      */
     public function __construct(
-        private readonly ConnectionInterface $connection,
+        public private(set) ConnectionInterface $connection,
         private readonly mixed $onRequest,
         private readonly int $maxBodySize = 10485760,
         private readonly int $maxHeaderSize = 16384,
@@ -213,14 +216,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->handleConnectionCloseEvent();
         $this->startHeaderTimer();
         $this->startRequestTimer();
-    }
-
-    /**
-     * @inheritDoc
-     */
-    public function getConnection(): ConnectionInterface
-    {
-        return $this->connection;
     }
 
     /**
@@ -298,13 +293,13 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         // optimistically-pipelined data from being parsed as subsequent HTTP requests.
         if (
             $this->currentRequest !== null
-            && $this->currentRequest->getMethod() === 'CONNECT'
-            && $response->getStatusCode() >= 400
+            && $this->currentRequest->method === 'CONNECT'
+            && $response->statusCode >= 400
         ) {
             $this->willCloseConnection = true;
         }
 
-        $body = $response->getBody();
+        $body = $response->body;
         $isStreamingOut = ! \is_string($body);
         $isChunkedResponse = false;
         $shouldClose = false;
@@ -326,12 +321,12 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         };
 
-        // PROTOCOL UPGRADE / HIJACK LOGIC 
+        // PROTOCOL UPGRADE / HIJACK LOGIC
         if ($response->upgradeCallback !== null) {
             $this->connection->write($headerBlock);
-            
+
             $trailingBytes = $this->detach();
-            
+
             $fiber = new \Fiber(function () use ($response, $trailingBytes) {
                 try {
                     ($response->upgradeCallback)($this->connection, $trailingBytes);
@@ -339,11 +334,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
                     $this->connection->close();
                 }
             });
-            
+
             Loop::addFiber($fiber);
-            
+
             $triggerComplete();
-            
+
             return;
         }
 
@@ -370,14 +365,6 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bufferOffset = 0;
 
         return $remaining;
-    }
-
-    /**
-     * @inheritDoc
-     */
-    public function getActiveRequestsCount(): int
-    {
-        return $this->activeRequestsCount;
     }
 
     /**
@@ -516,10 +503,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->bodyStream = new RequestBodyStream();
         $this->bodyStream->on('pause', $this->connection->pause(...));
         $this->bodyStream->on('resume', $this->connection->resume(...));
-        $request->setBody($this->bodyStream);
-
-        // Expose configuration limit so Request helper methods know the configured max
-        $request->maxBodySize = $this->maxBodySize;
+        $request->body = $this->bodyStream;
 
         // Trigger the user's application logic IMMEDIATELY
         $this->activeRequestsCount++;
@@ -771,11 +755,19 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         $this->processFramingHeaders($headers, $protocolVersion, $forceClose);
 
         $serverParams = $this->getServerParams();
-        $this->currentRequest = new Request($method, $target, $headers, '', $protocolVersion, $serverParams);
 
-        $this->currentRequest->maxHeaderSize = $this->maxHeaderSize;
-        $this->currentRequest->maxUploadedFiles = $this->maxUploadedFiles;
-        $this->currentRequest->maxFormFields = $this->maxFormFields;
+        $this->currentRequest = new Request(
+            method: $method,
+            uri: $target,
+            headers: $headers,
+            body: '',
+            protocolVersion: $protocolVersion,
+            serverParams: $serverParams,
+            maxBodySize: $this->maxBodySize,
+            maxHeaderSize: $this->maxHeaderSize,
+            maxUploadedFiles: $this->maxUploadedFiles,
+            maxFormFields: $this->maxFormFields
+        );
 
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
     }
@@ -970,9 +962,9 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function compileResponseHeaders(Response $response, bool $isStreamingOut, bool &$isChunkedResponse, bool &$shouldClose): string
     {
-        $version = $response->getProtocolVersion() === '1.1' ? $this->activeResponseVersion : $response->getProtocolVersion();
-        $headers = $response->getHeaders();
-        $body = $response->getBody();
+        $version = $response->protocolVersion === '1.1' ? $this->activeResponseVersion : $response->protocolVersion;
+        $headers = $response->headers;
+        $body = $response->body;
 
         if (! isset($headers['server'])) {
             $headers['server'] = ['Hibla/1.0'];
@@ -981,7 +973,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         if ($isStreamingOut && ! isset($headers['content-length'])) {
             $isChunkedResponse = true;
             $headers['transfer-encoding'] = ['chunked'];
-        } elseif (! $isStreamingOut && ! isset($headers['content-length']) && $response->getStatusCode() !== 101) {
+        } elseif (! $isStreamingOut && ! isset($headers['content-length']) && $response->statusCode !== 101) {
             $headers['content-length'] = [(string) \strlen(\is_string($body) ? $body : '')];
         }
 
@@ -993,7 +985,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $headers['connection'] = ['keep-alive'];
         }
 
-        $lines = ["HTTP/{$version} {$response->getStatusCode()} {$response->getReasonPhrase()}"];
+        $lines = ["HTTP/{$version} {$response->statusCode} {$response->reasonPhrase}"];
 
         foreach ($headers as $name => $values) {
             $displayName = self::formatHeaderNameForWire($name);

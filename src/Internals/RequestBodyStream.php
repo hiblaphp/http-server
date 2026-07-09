@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hibla\HttpServer\Message;
+namespace Hibla\HttpServer\Internals;
 
 use Evenement\EventEmitter;
 use Hibla\EventLoop\Loop;
@@ -10,6 +10,9 @@ use Hibla\Stream\Interfaces\ReadableStreamInterface;
 use Hibla\Stream\Interfaces\WritableStreamInterface;
 use Hibla\Stream\Util;
 
+/**
+ * @internal
+ */
 class RequestBodyStream extends EventEmitter implements ReadableStreamInterface
 {
     private bool $readable = true;

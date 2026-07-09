@@ -24,7 +24,7 @@ describe('RFC 9112 section 2.2 — Message Parsing Robustness', function () {
         $handler->handleData("\r\nGET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getMethod())->toBe('GET')
+            ->and($parsedRequest->method)->toBe('GET')
             ->and($buffer)->not->toContain('400')
         ;
     });
@@ -313,9 +313,9 @@ describe('RFC 9112 section 7.1.2 — Chunked Trailer Section', function () {
         $handler->handleData($raw);
 
         expect($parsedRequests)->toHaveCount(2)
-            ->and($parsedRequests[0]->getUri())->toBe('/first')
+            ->and($parsedRequests[0]->uri)->toBe('/first')
             ->and(await($parsedRequests[0]->getBufferedBody()))->toBe('hello')
-            ->and($parsedRequests[1]->getUri())->toBe('/second')
+            ->and($parsedRequests[1]->uri)->toBe('/second')
             ->and($buffer)->not->toContain('400')
         ;
     });

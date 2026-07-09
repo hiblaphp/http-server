@@ -11,17 +11,17 @@ use Hibla\Stream\Interfaces\ReadableStreamInterface;
 
 it('automatically sets the correct reason phrase', function () {
     $responseOk = new Response(200);
-    expect($responseOk->getStatusCode())->toBe(200)
-        ->and($responseOk->getReasonPhrase())->toBe('OK')
+    expect($responseOk->statusCode)->toBe(200)
+        ->and($responseOk->reasonPhrase)->toBe('OK')
     ;
 
     $responseNotFound = new Response(404);
-    expect($responseNotFound->getStatusCode())->toBe(404)
-        ->and($responseNotFound->getReasonPhrase())->toBe('Not Found')
+    expect($responseNotFound->statusCode)->toBe(404)
+        ->and($responseNotFound->reasonPhrase)->toBe('Not Found')
     ;
 
     $responseCustom = new Response(418, [], '', 'I am a coffee pot');
-    expect($responseCustom->getReasonPhrase())->toBe('I am a coffee pot');
+    expect($responseCustom->reasonPhrase)->toBe('I am a coffee pot');
 });
 
 it('normalizes headers on instantiation', function () {
@@ -30,7 +30,7 @@ it('normalizes headers on instantiation', function () {
         'X-Multiple' => ['A', 'B'],
     ]);
 
-    $headers = $response->getHeaders();
+    $headers = $response->headers;
 
     expect($headers)->toHaveKey('content-type')
         ->and($headers['content-type'])->toBe(['text/plain'])
@@ -55,7 +55,7 @@ it('can append values to existing headers via addHeader', function () {
     $response->addHeader('Set-Cookie', 'theme=dark');
     $response->addHeader('Set-Cookie', ['lang=en', 'track=0']);
 
-    expect($response->getHeaders()['set-cookie'])->toBe([
+    expect($response->headers['set-cookie'])->toBe([
         'session=123',
         'theme=dark',
         'lang=en',
@@ -66,9 +66,9 @@ it('can append values to existing headers via addHeader', function () {
 it('creates plaintext responses via factory', function () {
     $response = Response::plaintext('Hello World', 201);
 
-    expect($response->getStatusCode())->toBe(201)
+    expect($response->statusCode)->toBe(201)
         ->and($response->getHeaderLine('Content-Type'))->toBe('text/plain; charset=utf-8')
-        ->and($response->getBody())->toBe('Hello World')
+        ->and($response->body)->toBe('Hello World')
     ;
 });
 
@@ -76,34 +76,35 @@ it('creates json responses via factory', function () {
     $data = ['id' => 1, 'name' => 'Test'];
     $response = Response::json($data, 200);
 
-    expect($response->getStatusCode())->toBe(200)
+    expect($response->statusCode)->toBe(200)
         ->and($response->getHeaderLine('Content-Type'))->toBe('application/json')
-        ->and($response->getBody())->toContain('"name": "Test"')
+        ->and($response->body)->toContain('"name": "Test"')
     ;
 });
 
 it('throws an exception on invalid json data', function () {
     $resource = fopen('php://memory', 'r');
 
-    expect(fn() => Response::json($resource))
-        ->toThrow(JsonEncodingException::class, 'Unable to encode given data as JSON');
+    expect(fn () => Response::json($resource))
+        ->toThrow(JsonEncodingException::class, 'Unable to encode given data as JSON')
+    ;
 });
 
 it('creates html responses via factory', function () {
     $html = '<h1>Title</h1>';
     $response = Response::html($html, 403);
 
-    expect($response->getStatusCode())->toBe(403)
+    expect($response->statusCode)->toBe(403)
         ->and($response->getHeaderLine('Content-Type'))->toBe('text/html; charset=utf-8')
-        ->and($response->getBody())->toBe($html)
+        ->and($response->body)->toBe($html)
     ;
 });
 
 it('falls back to Unknown for unrecognized status codes', function () {
     $response = new Response(999);
 
-    expect($response->getStatusCode())->toBe(999)
-        ->and($response->getReasonPhrase())->toBe('Unknown')
+    expect($response->statusCode)->toBe(999)
+        ->and($response->reasonPhrase)->toBe('Unknown')
     ;
 });
 
@@ -120,7 +121,7 @@ it('completely overwrites existing values when using setHeader', function () {
 it('creates the header if it does not exist when using addHeader', function () {
     $response = new Response(200);
 
-    expect($response->getHeaders())->toBeEmpty();
+    expect($response->headers)->toBeEmpty();
 
     $response->addHeader('X-New-Header', 'FirstValue');
 
@@ -132,15 +133,15 @@ it('creates valid Server-Sent Events (SSE) responses via factory', function () {
         // Dummy emitter
     });
 
-    expect($response->getStatusCode())->toBe(200)
+    expect($response->statusCode)->toBe(200)
         ->and($response->getHeaderLine('Content-Type'))->toBe('text/event-stream')
         ->and($response->getHeaderLine('Cache-Control'))->toBe('no-cache')
         ->and($response->getHeaderLine('Connection'))->toBe('keep-alive')
         ->and($response->getHeaderLine('X-Accel-Buffering'))->toBe('no')
     ;
 
-    expect($response->getBody())->toBeInstanceOf(SseStream::class)
-        ->and($response->getBody()->isReadable())->toBeTrue()
+    expect($response->body)->toBeInstanceOf(SseStream::class)
+        ->and($response->body->isReadable())->toBeTrue()
     ;
 });
 
@@ -148,21 +149,21 @@ it('can accept a readable stream as a response body', function () {
     $dummyStream = Mockery::mock(ReadableStreamInterface::class);
 
     $response = new Response();
-    $response->setBody($dummyStream);
+    $response->body = $dummyStream;
 
-    expect($response->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
-        ->and($response->getBody())->toBe($dummyStream)
+    expect($response->body)->toBeInstanceOf(ReadableStreamInterface::class)
+        ->and($response->body)->toBe($dummyStream)
     ;
 });
 
 it('creates valid redirect responses via factory', function () {
     $response = Response::redirect('https://example.com');
-    expect($response->getStatusCode())->toBe(302)
+    expect($response->statusCode)->toBe(302)
         ->and($response->getHeaderLine('Location'))->toBe('https://example.com')
     ;
 
     $response301 = Response::redirect('/home', 301);
-    expect($response301->getStatusCode())->toBe(301)
+    expect($response301->statusCode)->toBe(301)
         ->and($response301->getHeaderLine('Location'))->toBe('/home')
     ;
 });
@@ -170,9 +171,9 @@ it('creates valid redirect responses via factory', function () {
 describe('Response::file', function () {
     it('creates a 404 plaintext response when the file does not exist', function () {
         $response = Response::file('/non/existent/file.txt');
-        expect($response->getStatusCode())->toBe(404)
+        expect($response->statusCode)->toBe(404)
             ->and($response->getHeaderLine('Content-Type'))->toBe('text/plain; charset=utf-8')
-            ->and($response->getBody())->toBe('File Not Found')
+            ->and($response->body)->toBe('File Not Found')
         ;
     });
 
@@ -182,14 +183,14 @@ describe('Response::file', function () {
 
         $response = Response::file($tempFile);
 
-        expect($response->getStatusCode())->toBe(200)
+        expect($response->statusCode)->toBe(200)
             ->and($response->getHeaderLine('Content-Type'))->toBe('application/octet-stream')
             ->and($response->getHeaderLine('Content-Length'))->toBe((string) filesize($tempFile))
             ->and($response->getHeaderLine('Accept-Ranges'))->toBe('bytes')
-            ->and($response->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
+            ->and($response->body)->toBeInstanceOf(ReadableStreamInterface::class)
         ;
 
-        $response->getBody()->close();
+        $response->body->close();
         @unlink($tempFile);
     });
 
@@ -200,7 +201,7 @@ describe('Response::file', function () {
         $response = Response::file($tempCss);
         expect($response->getHeaderLine('Content-Type'))->toBe('text/css; charset=utf-8');
 
-        $response->getBody()->close();
+        $response->body->close();
         @unlink($tempCss);
     });
 
@@ -217,13 +218,13 @@ describe('Response::file', function () {
 
         $response = Response::file($tempFile, $request);
 
-        expect($response->getStatusCode())->toBe(206)
+        expect($response->statusCode)->toBe(206)
             ->and($response->getHeaderLine('Content-Range'))->toBe('bytes 2-5/10')
             ->and($response->getHeaderLine('Content-Length'))->toBe('4')
-            ->and($response->getBody())->toBeInstanceOf(ReadableStreamInterface::class)
+            ->and($response->body)->toBeInstanceOf(ReadableStreamInterface::class)
         ;
         $dataReceived = '';
-        $stream = $response->getBody();
+        $stream = $response->body;
         $stream->on('data', function (string $chunk) use (&$dataReceived) {
             $dataReceived .= $chunk;
         });
@@ -242,7 +243,7 @@ describe('Response::file', function () {
 
         $fp = fopen($tempFile, 'wb');
 
-        $oneMegabyteChunk = str_repeat('a', 1024 * 1024); 
+        $oneMegabyteChunk = str_repeat('a', 1024 * 1024);
 
         for ($i = 0; $i < 100; $i++) {
             fwrite($fp, $oneMegabyteChunk);
@@ -253,16 +254,17 @@ describe('Response::file', function () {
         if (function_exists('memory_reset_peak_usage')) {
             memory_reset_peak_usage();
         }
-        
+
         $startPeakMemory = memory_get_peak_usage();
 
         $response = Response::file($tempFile);
-        expect($response->getStatusCode())->toBe(200)
-            ->and($response->getHeaderLine('Content-Length'))->toBe('104857600'); 
+        expect($response->statusCode)->toBe(200)
+            ->and($response->getHeaderLine('Content-Length'))->toBe('104857600')
+        ;
 
         $bytesRead = 0;
 
-        $stream = $response->getBody();
+        $stream = $response->body;
 
         $stream->on('data', function (string $chunk) use (&$bytesRead) {
             $bytesRead += strlen($chunk);

@@ -7,7 +7,7 @@ use Hibla\HttpClient\Http;
 use Hibla\HttpClient\SSE\SSEControl;
 use Hibla\HttpClient\SSE\SSEEvent as ClientSseEvent;
 use Hibla\HttpServer\Exceptions\MultipartPartTooLargeException;
-use Hibla\HttpServer\Message\MultipartParser;
+use Hibla\HttpServer\Internals\MultipartParser;
 use Hibla\HttpServer\Message\Request as ServerRequest;
 use Hibla\HttpServer\Message\Response as ServerResponse;
 use Hibla\HttpServer\Message\SseStream as ServerSseStream;
@@ -27,7 +27,7 @@ afterEach(function () {
 describe('Core HTTP Functionality', function () {
     it('handles a real GET request end-to-end', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext("Hello from the Server! Method: {$request->getMethod()}");
+            return ServerResponse::plaintext("Hello from the Server! Method: {$request->method}");
         });
 
         try {
@@ -156,10 +156,10 @@ describe('Core HTTP Functionality', function () {
 describe('Browser-Like Simulation', function () {
     it('persists cookies across requests like a real browser', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getUri() === '/login') {
+            if ($request->uri === '/login') {
                 return new ServerResponse(200, ['Set-Cookie' => 'session_id=xyz123; HttpOnly'], 'Logged in');
             }
-            if ($request->getUri() === '/dashboard') {
+            if ($request->uri === '/dashboard') {
                 $cookie = $request->getHeaderLine('Cookie');
 
                 return ServerResponse::plaintext("Cookie received: {$cookie}");
@@ -183,10 +183,10 @@ describe('Browser-Like Simulation', function () {
 
     it('follows redirects automatically', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getUri() === '/old-page') {
+            if ($request->uri === '/old-page') {
                 return new ServerResponse(302, ['Location' => '/new-page']);
             }
-            if ($request->getUri() === '/new-page') {
+            if ($request->uri === '/new-page') {
                 return ServerResponse::plaintext('You have reached the new page');
             }
 
@@ -234,7 +234,7 @@ describe('Browser-Like Simulation', function () {
 
     it('fetches concurrent assets like a browser rendering a page', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $uri = $request->getUri();
+            $uri = $request->uri;
             if ($uri === '/index.html') {
                 return ServerResponse::html('<link href="/style.css"><script src="/app.js"></script><img src="/logo.png">');
             }
@@ -272,7 +272,7 @@ describe('Browser-Like Simulation', function () {
 
     it('supports true duplex streaming by piping an incoming request stream directly to an outgoing response stream', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $reqBody = $request->getBody();
+            $reqBody = $request->body;
             $resBody = new ThroughStream();
             $reqBody->pipe($resBody);
 
@@ -315,7 +315,7 @@ describe('Browser-Like Simulation', function () {
 describe('Advanced Client-Server Interactions', function () {
     it('streams massive request bodies asynchronously without buffering in memory', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $stream = $request->getBody();
+            $stream = $request->body;
             $receivedBytes = 0;
 
             $uploadPromise = new Promise(function ($resolve) use ($stream, &$receivedBytes) {
@@ -347,7 +347,7 @@ describe('Advanced Client-Server Interactions', function () {
 
     it('accurately preserves and routes complex query parameters', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext("URI: {$request->getUri()}");
+            return ServerResponse::plaintext("URI: {$request->uri}");
         });
 
         try {
@@ -397,7 +397,7 @@ describe('Advanced Client-Server Interactions', function () {
 
     it('correctly reports HTTP 404 Not Found and custom status codes', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            if ($request->getUri() === '/teapot') {
+            if ($request->uri === '/teapot') {
                 return new ServerResponse(418, [], 'Short and stout');
             }
 
@@ -494,7 +494,7 @@ describe('Advanced Client-Server Interactions', function () {
 
     it('modifies streaming request data on-the-fly using a ThroughStream transformer', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $reqBody = $request->getBody();
+            $reqBody = $request->body;
             $uppercaseStream = new ThroughStream(function (string $chunk) {
                 return strtoupper($chunk);
             });
@@ -854,7 +854,7 @@ describe('Advanced Client-Server Interactions', function () {
                 });
             });
 
-            $request->getBody()->pipe($parser);
+            $request->body->pipe($parser);
 
             try {
                 await($s3UploadPromise);
@@ -1021,10 +1021,10 @@ describe('Advanced Client-Server Interactions', function () {
 });
 
 describe('Application Exception Handling (onError)', function () {
-    
+
     it('returns a standard 500 Internal Server Error when no custom error handler is attached', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            throw new \RuntimeException('Database connection failed');
+            throw new RuntimeException('Database connection failed');
         });
 
         try {
@@ -1040,17 +1040,17 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('allows a custom error handler to render a custom response', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
             return ServerResponse::json([
                 'error' => true,
                 'message' => $e->getMessage(),
-                'path' => $request->getUri()
+                'path' => $request->uri,
             ], 503);
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \LogicException('Redis is down');
+                throw new LogicException('Redis is down');
             },
             errorHandler: $errorHandler
         );
@@ -1070,13 +1070,13 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('falls back to the standard 500 error retaining the original exception if the custom handler returns null', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
             return null;
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \RuntimeException('Original Database Error');
+                throw new RuntimeException('Original Database Error');
             },
             errorHandler: $errorHandler
         );
@@ -1095,14 +1095,14 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('falls back to the standard 500 error if the custom error handler itself throws an exception', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
             // Oh no, the error logger is also broken!
-            throw new \RuntimeException('Error logger failed');
+            throw new RuntimeException('Error logger failed');
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \LogicException('Initial application error');
+                throw new LogicException('Initial application error');
             },
             errorHandler: $errorHandler
         );
@@ -1120,13 +1120,13 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('falls back to the standard 500 error if the custom error handler returns a non-Response object', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
-            return "This is a string, not a Response object!";
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return 'This is a string, not a Response object!';
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \Exception('Oops');
+                throw new Exception('Oops');
             },
             errorHandler: $errorHandler
         );
@@ -1144,13 +1144,13 @@ describe('Application Exception Handling (onError)', function () {
     });
 
     it('forcefully applies Connection: close to custom error responses to prevent state desynchronization', function () {
-        $errorHandler = function (\Throwable $e, ServerRequest $request) {
-            return ServerResponse::plaintext("Custom error page", 500);
+        $errorHandler = function (Throwable $e, ServerRequest $request) {
+            return ServerResponse::plaintext('Custom error page', 500);
         };
 
         [$socket, $url] = createTestServer(
             requestHandler: function (ServerRequest $request) {
-                throw new \Exception('Oops');
+                throw new Exception('Oops');
             },
             errorHandler: $errorHandler
         );

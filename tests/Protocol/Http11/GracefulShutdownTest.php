@@ -140,11 +140,11 @@ describe('Protocol-level Graceful Shutdown', function () {
         });
 
         $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
-            $request->getBody()->on('data', function (string $chunk) {
+            $request->body->on('data', function (string $chunk) {
                 // attache dummy data event to let the stream consume the sunk otherwise this test will fail
             });
 
-            $request->getBody()->on('end', function () use ($protocol) {
+            $request->body->on('end', function () use ($protocol) {
                 $protocol->writeResponse(Response::plaintext('Upload received'));
             });
         });

@@ -21,7 +21,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('uses its own socket address for the URI when no Host header is present on HTTP/1.0', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext((string) $request->getUri());
+            return ServerResponse::plaintext((string) $request->uri);
         });
 
         try {
@@ -86,7 +86,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('gives precedence to the Host header for URI construction', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext((string) $request->getUri());
+            return ServerResponse::plaintext((string) $request->uri);
         });
 
         try {
@@ -103,7 +103,7 @@ describe('Protocol Compliance & Advanced Features', function () {
             'tls' => ['local_cert' => __DIR__ . '/../Fixtures/localhost.pem'],
         ];
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::json(['secure' => true, 'uri' => (string) $request->getUri()]);
+            return ServerResponse::json(['secure' => true, 'uri' => (string) $request->uri]);
         }, context: $context);
 
         try {
@@ -150,7 +150,7 @@ describe('Protocol Compliance & Advanced Features', function () {
                 $response = new ServerResponse(101, ['Upgrade' => 'echo', 'Connection' => 'Upgrade']);
                 $protocol->writeResponse($response);
 
-                $connection = $protocol->getConnection();
+                $connection = $protocol->connection;
                 $protocol->detach();
 
                 $connection->on('data', function (string $chunk) use ($connection) {
@@ -179,7 +179,7 @@ describe('Protocol Compliance & Advanced Features', function () {
             await($switched);
 
             $echoPromise = new Promise(function ($resolve) use ($connection) {
-                $connection->once('data', fn($chunk) => $resolve($chunk));
+                $connection->once('data', fn ($chunk) => $resolve($chunk));
             });
 
             $connection->write('Hello, Echo!');
@@ -193,14 +193,14 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('handles HTTP CONNECT requests for tunneling', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request, ProtocolHandlerInterface $protocol) {
-            if ($request->getMethod() === 'CONNECT') {
+            if ($request->method === 'CONNECT') {
                 $response = new ServerResponse(200, [], '');
                 $protocol->writeResponse($response);
 
-                $connection = $protocol->getConnection();
+                $connection = $protocol->connection;
                 $protocol->detach();
 
-                $connection->on('data', fn($chunk) => $connection->write('Proxied: ' . $chunk));
+                $connection->on('data', fn ($chunk) => $connection->write('Proxied: ' . $chunk));
 
                 return;
             }
@@ -214,10 +214,10 @@ describe('Protocol Compliance & Advanced Features', function () {
 
             $connection->write("CONNECT api.example.com:443 HTTP/1.1\r\nHost: api.example.com:443\r\n\r\n");
 
-            $connected = new Promise(fn($res) => $connection->once('data', fn($c) => $res(str_contains($c, '200 OK'))));
+            $connected = new Promise(fn ($res) => $connection->once('data', fn ($c) => $res(str_contains($c, '200 OK'))));
             await($connected);
 
-            $echoPromise = new Promise(fn($res) => $connection->once('data', $res));
+            $echoPromise = new Promise(fn ($res) => $connection->once('data', $res));
             $connection->write('Raw TCP data');
 
             $echo = await($echoPromise);
@@ -228,10 +228,10 @@ describe('Protocol Compliance & Advanced Features', function () {
     });
 
     it('emits close on request body stream if client disconnects mid-upload', function () {
-        $closeEventFired = new Promise(fn($res) => $GLOBALS['resolveClose'] = $res);
+        $closeEventFired = new Promise(fn ($res) => $GLOBALS['resolveClose'] = $res);
 
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            $request->getBody()->on('close', fn() => $GLOBALS['resolveClose'](true));
+            $request->body->on('close', fn () => $GLOBALS['resolveClose'](true));
         });
 
         try {
@@ -240,7 +240,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
             $connection->write("POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10000\r\n\r\nPartial");
 
-            Loop::addTimer(0.01, fn() => $connection->close());
+            Loop::addTimer(0.01, fn () => $connection->close());
 
             $wasClosed = await($closeEventFired);
             expect($wasClosed)->toBeTrue();
@@ -252,7 +252,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('closes the response stream if the client disconnects mid-download', function () {
         $responseStream = new ThroughStream();
-        $streamClosedPromise = new Promise(fn($res) => $responseStream->on('close', fn() => $res(true)));
+        $streamClosedPromise = new Promise(fn ($res) => $responseStream->on('close', fn () => $res(true)));
 
         [$socket, $url] = createTestServer(function (ServerRequest $request) use ($responseStream) {
             return new ServerResponse(200, [], $responseStream);
@@ -328,7 +328,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
     it('supports multiple sequential requests on the same TCP connection (HTTP/1.1 Keep-Alive)', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('Path: ' . $request->getUri());
+            return ServerResponse::plaintext('Path: ' . $request->uri);
         });
 
         try {
@@ -387,7 +387,7 @@ describe('Protocol Compliance & Advanced Features', function () {
 
             $connection->write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
 
-            $connectionClosedPromise = new Promise(fn($resolve) => $connection->on('close', fn() => $resolve(true)));
+            $connectionClosedPromise = new Promise(fn ($resolve) => $connection->on('close', fn () => $resolve(true)));
 
             $wasClosed = await($connectionClosedPromise);
             expect($wasClosed)->toBeTrue();
@@ -469,7 +469,7 @@ describe('Protocol Compliance & Advanced Features', function () {
             await($switched);
 
             $echoPromise = new Promise(function ($resolve) use ($connection) {
-                $connection->once('data', fn($chunk) => $resolve($chunk));
+                $connection->once('data', fn ($chunk) => $resolve($chunk));
             });
 
             $connection->write('Hello, Ergonomic Echo!');

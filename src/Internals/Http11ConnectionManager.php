@@ -9,7 +9,6 @@ use Hibla\HttpServer\Exceptions\InvalidResponseException;
 use Hibla\HttpServer\Interfaces\ConnectionManagerInterface;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 use Hibla\Socket\Interfaces\ConnectionInterface;
@@ -109,7 +108,11 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
      */
     public function getActiveRequestsCount(): int
     {
-        return $this->protocolHandler?->getActiveRequestsCount() ?? 0;
+        if ($this->protocolHandler === null) {
+            return 0;
+        }
+
+        return $this->protocolHandler->activeRequestsCount;
     }
 
     /**
@@ -126,7 +129,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         $this->pipelineQueue[] = $item;
 
         if (\count($this->pipelineQueue) >= $this->maxConcurrentRequestsPerConnection) {
-            $protocol->getConnection()->pause();
+            $protocol->connection->pause();
         }
 
         $fiber = new \Fiber(function () use ($request, $protocol, $item): void {
@@ -198,7 +201,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
     private function enforceBodyConsumptionSafety(Request $request, Response $response): void
     {
-        $body = $request->getBody();
+        $body = $request->body;
 
         if ($body instanceof RequestBodyStream) {
             if ($body->isReadable() && ! $body->hasDataListener()) {
@@ -225,7 +228,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         }
 
         $this->isFlushing = true;
-        $connection = $protocolHandler->getConnection();
+        $connection = $protocolHandler->connection;
 
         $onComplete = function () use ($connection): void {
             array_shift($this->pipelineQueue);

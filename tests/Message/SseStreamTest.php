@@ -5,6 +5,10 @@ declare(strict_types=1);
 use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Message\SseStream;
 
+afterEach(function () {
+    Loop::reset();
+});
+
 it('starts as readable and unpaused', function () {
     $stream = new SseStream();
 
@@ -81,10 +85,9 @@ it('does not emit events once closed', function () {
 });
 
 it('suspends the emitter fiber when the stream is paused to apply backpressure', function () {
-    $stream = new SseStream();
     $stepReached = 0;
 
-    $fiber = new Fiber(function () use ($stream, &$stepReached) {
+    $stream = new SseStream(function (SseStream $stream) use (&$stepReached) {
         $stepReached = 1;
         $stream->send('First Event');
 
@@ -94,7 +97,7 @@ it('suspends the emitter fiber when the stream is paused to apply backpressure',
         $stepReached = 3;
     });
 
-    $stream->setEmitterFiber($fiber);
+    $fiber = getPrivateProperty($stream, 'emitterFiber');
 
     $stream->pause();
 
@@ -115,10 +118,9 @@ it('suspends the emitter fiber when the stream is paused to apply backpressure',
 });
 
 it('integrates with the real Event Loop to schedule and resume suspended fibers automatically', function () {
-    $stream = new SseStream();
     $stepReached = 0;
 
-    $fiber = new Fiber(function () use ($stream, &$stepReached) {
+    $stream = new SseStream(function (SseStream $stream) use (&$stepReached) {
         $stepReached = 1;
         $stream->send('First Event');
 
@@ -128,14 +130,12 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
         $stepReached = 3;
     });
 
-    $stream->setEmitterFiber($fiber);
+    $fiber = getPrivateProperty($stream, 'emitterFiber');
 
     $stream->pause();
 
-    Loop::addFiber($fiber);
-
-    Loop::nextTick(function () use ($stream) {
-        $stream->resume(); // This internally calls Loop::scheduleFiber()
+    Loop::addTimer(0.01, function () use ($stream) {
+        $stream->resume();
     });
 
     Loop::run();
@@ -143,6 +143,27 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
     expect($fiber->isTerminated())->toBeTrue()
         ->and($stepReached)->toBe(3)
     ;
+
+    $stream->close();
+});
+
+it('does not forcefully resume a fiber suspended by application logic during stream resume', function () {
+    $stream = new SseStream(function (SseStream $stream) {
+        \Fiber::suspend();
+    });
+
+    $fiber = getPrivateProperty($stream, 'emitterFiber');
+
+    $fiber->start();
+
+    expect($fiber->isSuspended())->toBeTrue();
+
+    $stream->resume();
+
+    expect($fiber->isSuspended())->toBeTrue();
+
+    $fiber->resume();
+    expect($fiber->isTerminated())->toBeTrue();
 
     $stream->close();
 });

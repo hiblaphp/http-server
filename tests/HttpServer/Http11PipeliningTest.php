@@ -24,7 +24,7 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
         $log = [];
 
         [$socket, $url] = createTestServer(function (ServerRequest $request) use (&$log) {
-            $uri = $request->getUri();
+            $uri = $request->uri;
             $log[] = "start:{$uri}";
 
             if ($uri === '/slow') {
@@ -87,7 +87,7 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
         HttpServer::attachProtocolHandler(
             $socket,
             function (ServerRequest $request) use (&$deferreds) {
-                $uri = $request->getUri();
+                $uri = $request->uri;
 
                 return await(new Promise(function ($resolve) use (&$deferreds, $uri) {
                     $deferreds[$uri] = $resolve;
@@ -174,7 +174,7 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
 
     it('honors HTTP/1.0 Keep-Alive headers during pipelined execution on a real socket', function () {
         [$socket, $url] = createTestServer(function (ServerRequest $request) {
-            return ServerResponse::plaintext('URI: ' . $request->getUri() . ' Protocol: ' . $request->getProtocolVersion());
+            return ServerResponse::plaintext('URI: ' . $request->uri . ' Protocol: ' . $request->protocolVersion);
         });
 
         try {
@@ -220,7 +220,7 @@ describe('HttpServer Pipelining & Backpressure Integration', function () {
 
         [$socket, $url] = createTestServer(function (ServerRequest $request, ProtocolHandlerInterface $protocol) use (&$processedCount) {
             $processedCount++;
-            if ($request->getUri() === '/upgrade') {
+            if ($request->uri === '/upgrade') {
                 $protocol->writeResponse(new ServerResponse(101, ['Upgrade' => 'echo', 'Connection' => 'Upgrade']));
                 $protocol->detach();
 

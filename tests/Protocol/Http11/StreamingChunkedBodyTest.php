@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use Hibla\HttpServer\Internals\RequestBodyStream;
 use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\RequestBodyStream;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 
 describe('Streaming — Chunked partial read: basic delivery', function () {
@@ -26,11 +26,11 @@ describe('Streaming — Chunked partial read: basic delivery', function () {
         );
 
         expect($parsedRequest)->not->toBeNull()
-            ->and($parsedRequest->getBody())->toBeInstanceOf(RequestBodyStream::class)
+            ->and($parsedRequest->body)->toBeInstanceOf(RequestBodyStream::class)
         ;
 
         $received = '';
-        $parsedRequest->getBody()->on('data', function (string $chunk) use (&$received) {
+        $parsedRequest->body->on('data', function (string $chunk) use (&$received) {
             $received .= $chunk;
         });
 
@@ -57,10 +57,10 @@ describe('Streaming — Chunked partial read: CRLF boundary split across TCP pac
         $handler = new Http11ProtocolHandler(
             $connection,
             function (Request $request) use (&$received, &$ended) {
-                $request->getBody()->on('data', function (string $chunk) use (&$received) {
+                $request->body->on('data', function (string $chunk) use (&$received) {
                     $received .= $chunk;
                 });
-                $request->getBody()->on('end', function () use (&$ended) {
+                $request->body->on('end', function () use (&$ended) {
                     $ended = true;
                 });
             },
@@ -92,7 +92,7 @@ describe('Streaming — Chunked partial read: CRLF boundary split across TCP pac
         $handler = new Http11ProtocolHandler(
             $connection,
             function (Request $request) use (&$received) {
-                $request->getBody()->on('data', function (string $chunk) use (&$received) {
+                $request->body->on('data', function (string $chunk) use (&$received) {
                     $received .= $chunk;
                 });
             },
@@ -120,10 +120,10 @@ describe('Streaming — Chunked partial read: CRLF boundary split across TCP pac
         $handler = new Http11ProtocolHandler(
             $connection,
             function (Request $request) use (&$received, &$ended) {
-                $request->getBody()->on('data', function (string $chunk) use (&$received) {
+                $request->body->on('data', function (string $chunk) use (&$received) {
                     $received .= $chunk;
                 });
-                $request->getBody()->on('end', function () use (&$ended) {
+                $request->body->on('end', function () use (&$ended) {
                     $ended = true;
                 });
             },
@@ -167,10 +167,10 @@ describe('Streaming — Chunked partial read: multi-chunk sequencing', function 
 
         $received = '';
         $ended = false;
-        $parsedRequest->getBody()->on('data', function (string $chunk) use (&$received) {
+        $parsedRequest->body->on('data', function (string $chunk) use (&$received) {
             $received .= $chunk;
         });
-        $parsedRequest->getBody()->on('end', function () use (&$ended) {
+        $parsedRequest->body->on('end', function () use (&$ended) {
             $ended = true;
         });
 
@@ -208,7 +208,7 @@ describe('Streaming — Chunked partial read: multi-chunk sequencing', function 
         );
 
         $received = '';
-        $parsedRequest->getBody()->on('data', function (string $chunk) use (&$received) {
+        $parsedRequest->body->on('data', function (string $chunk) use (&$received) {
             $received .= $chunk;
         });
 
@@ -250,10 +250,10 @@ describe('Streaming — Chunked partial read: end event integrity', function () 
 
         $endCount = 0;
 
-        $parsedRequest->getBody()->on('data', function () {
+        $parsedRequest->body->on('data', function () {
         });
 
-        $parsedRequest->getBody()->on('end', function () use (&$endCount) {
+        $parsedRequest->body->on('end', function () use (&$endCount) {
             $endCount++;
         });
 
@@ -280,10 +280,10 @@ describe('Streaming — Chunked partial read: end event integrity', function () 
 
         $endCount = 0;
 
-        $parsedRequest->getBody()->on('data', function () {
+        $parsedRequest->body->on('data', function () {
         });
 
-        $parsedRequest->getBody()->on('end', function () use (&$endCount) {
+        $parsedRequest->body->on('end', function () use (&$endCount) {
             $endCount++;
         });
 

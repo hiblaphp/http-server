@@ -14,7 +14,12 @@ abstract class AbstractMessage
     /**
      * @var array<string, list<string>> Normalized message headers
      */
-    public array $headers = [];
+    public protected(set) array $headers = [];
+
+    /**
+     * @var string The HTTP protocol version
+     */
+    public protected(set) string $protocolVersion = '1.1';
 
     /**
      * @var string|ReadableStreamInterface The message body payload.
@@ -22,29 +27,6 @@ abstract class AbstractMessage
      *                                     For outgoing Responses, this is typically a string, but can be a stream.
      */
     public string|ReadableStreamInterface $body = '';
-
-    /**
-     * @var string The HTTP protocol version
-     */
-    public string $protocolVersion = '1.1';
-
-    /**
-     * Retrieves the HTTP protocol version.
-     */
-    public function getProtocolVersion(): string
-    {
-        return $this->protocolVersion;
-    }
-
-    /**
-     * Retrieves all message headers.
-     *
-     * @return array<string, list<string>>
-     */
-    public function getHeaders(): array
-    {
-        return $this->headers;
-    }
 
     /**
      * Retrieves a specific header's values as a list of strings.
@@ -114,22 +96,6 @@ abstract class AbstractMessage
             ...($this->headers[$normalizedName] ?? []),
             ...$values,
         ];
-    }
-
-    /**
-     * Retrieves the message body payload.
-     */
-    public function getBody(): string|ReadableStreamInterface
-    {
-        return $this->body;
-    }
-
-    /**
-     * Sets or updates the message body payload.
-     */
-    public function setBody(string|ReadableStreamInterface $body): void
-    {
-        $this->body = $body;
     }
 
     /**
