@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Hibla\EventLoop\Loop;
 use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
 use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
@@ -543,5 +544,153 @@ describe('sendErrorAndClose() settle a pending getBufferedBody() promise', funct
             ->and($resolvedValue)->toBeNull()
             ->and($rejectedError)->toBe($rejectedError)
         ;
+    });
+});
+
+describe('Keep-Alive Limit Robust Edge Cases', function () {
+
+    it('discards and ignores any pipelined requests that exceed the keep-alive limit in a single TCP packet', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $processedRequests = [];
+
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request, ProtocolHandlerInterface $protocol) use (&$processedRequests) {
+                $processedRequests[] = $request->uri;
+
+                Loop::nextTick(function () use ($protocol) {
+                    $protocol->writeResponse(new Response(200, [], 'OK'));
+                });
+            },
+            keepAliveMaxRequests: 2
+        );
+
+        $handler->handleData(
+            "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n" .
+            "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n" .
+            "GET /third-smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        );
+
+        await(delay(0.02));
+
+        expect($processedRequests)->toBe(['/first', '/second'])
+            ->and($buffer)->toContain('HTTP/1.1 200 OK')
+            ->and($buffer)->toContain('Connection: close')
+            ->and($buffer)->not->toContain('/third-smuggled')
+        ;
+    });
+
+    it('cleanly cancels all active timeouts when the connection is closed due to keep-alive limits', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request, ProtocolHandlerInterface $protocol) {
+                Loop::nextTick(function () use ($protocol) {
+                    $protocol->writeResponse(new Response(200, [], 'OK'));
+                });
+            },
+            headerTimeout: 0.05,
+            keepAliveTimeout: 0.05,
+            keepAliveMaxRequests: 1
+        );
+
+        $handler->handleData("GET /1 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+        await(delay(0.02));
+
+        expect($buffer)->toContain('Connection: close');
+
+        $buffer = '';
+
+        await(delay(0.06));
+
+        expect($buffer)->toBeEmpty();
+    });
+
+    it('honors an explicit client Connection: close header even if the keep-alive limit has not been reached yet', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request, ProtocolHandlerInterface $protocol) {
+                Loop::nextTick(function () use ($protocol) {
+                    $protocol->writeResponse(new Response(200, [], 'OK'));
+                });
+            },
+            keepAliveMaxRequests: 5
+        );
+
+        $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+
+        await(delay(0.02));
+
+        expect($buffer)->toContain('HTTP/1.1 200 OK')
+            ->and($buffer)->toContain('Connection: close')
+        ;
+    });
+
+    it('enforces Connection: close on HTTP/1.0 keep-alive requests when the keep-alive limit is hit', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request, ProtocolHandlerInterface $protocol) {
+                Loop::nextTick(function () use ($protocol) {
+                    $protocol->writeResponse(new Response(200, [], 'OK'));
+                });
+            },
+            keepAliveMaxRequests: 1
+        );
+
+        $handler->handleData("GET / HTTP/1.0\r\nConnection: keep-alive\r\n\r\n");
+
+        await(delay(0.02));
+
+        expect($buffer)->toContain('HTTP/1.0 200 OK')
+            ->and($buffer)->toContain('Connection: close')
+            ->and($buffer)->not->toContain('Connection: keep-alive')
+        ;
+    });
+
+    it('defers connection closure until the entire chunked response stream is drained when the keep-alive limit is hit', function () {
+        $buffer = '';
+        $connection = mockStreamingConnection($buffer);
+
+        $responseStream = new Hibla\Stream\ThroughStream();
+
+        $handler = new Http11ProtocolHandler(
+            $connection,
+            function (Request $request, ProtocolHandlerInterface $protocol) use ($responseStream) {
+                $protocol->writeResponse(new Response(200, [], $responseStream));
+            },
+            keepAliveMaxRequests: 1 // Hits limit immediately
+        );
+
+        $handler->handleData("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        await(delay(0.01));
+
+        expect($buffer)->toContain('HTTP/1.1 200 OK')
+            ->and($buffer)->toContain('Transfer-Encoding: chunked')
+            ->and($buffer)->toContain('Connection: close')
+        ;
+
+        $buffer = '';
+
+        $responseStream->write('stream-chunk-1');
+        await(delay(0.01));
+        expect($buffer)->toContain("e\r\nstream-chunk-1\r\n");
+
+        $buffer = '';
+
+        $responseStream->end();
+        await(delay(0.01));
+
+        expect($buffer)->toContain("0\r\n\r\n");
     });
 });

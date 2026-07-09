@@ -437,6 +437,15 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      */
     private function parseHeadersPhase(): bool
     {
+        // EDGE CASE: If this connection is already flagged to close (e.g., hit keep-alive limit),
+        // completely ignore and discard any subsequent pipelined requests in the buffer.
+        if ($this->willCloseConnection) {
+            $this->buffer = '';
+            $this->bufferOffset = 0;
+
+            return false;
+        }
+
         $bufLen = \strlen($this->buffer);
 
         while (
