@@ -35,7 +35,18 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
 
     /**
      * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
+     * @param int $maxBodySize
+     * @param int $maxHeaderSize
+     * @param int $maxHeaderCount
+     * @param float|null $headerTimeout
+     * @param float|null $bodyTimeout
+     * @param float|null $requestTimeout
+     * @param float|null $keepAliveTimeout
+     * @param int $maxConcurrentRequestsPerConnection
+     * @param int $maxUploadedFiles
+     * @param int $maxFormFields
      * @param (callable(\Throwable, Request): (Response|null))|null $errorHandler
+     * @param (callable(Request): void)|null $onClientDisconnect
      */
     public function __construct(
         callable $requestHandler,
@@ -49,7 +60,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         private readonly int $maxConcurrentRequestsPerConnection = 128,
         private readonly int $maxUploadedFiles = 20,
         private readonly int $maxFormFields = 1000,
-        private readonly mixed $errorHandler = null
+        private readonly mixed $errorHandler = null,
+        private readonly mixed $onClientDisconnect = null
     ) {
         $this->requestHandler = $requestHandler;
     }
@@ -86,6 +98,23 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         };
 
         $connection->on('close', function (): void {
+            // Trigger disconnects for any requests that haven't finished processing
+            foreach ($this->pipelineQueue as $item) {
+                if ($item->disconnectTrigger !== null) {
+                    ($item->disconnectTrigger)();
+                }
+
+                if ($this->onClientDisconnect !== null && $item->request !== null) {
+                    $req = $item->request;
+                    Loop::addFiber(new \Fiber(function () use ($req): void {
+                        try {
+                            ($this->onClientDisconnect)($req);
+                        } catch (\Throwable) {
+                        }
+                    }));
+                }
+            }
+
             $this->pipelineQueue = [];
             $this->protocolHandler = null;
         });
@@ -123,9 +152,12 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         return $this->protocolHandler?->isUpgraded() ?? true;
     }
 
-    private function onRequest(Request $request, ProtocolHandlerInterface $protocol): void
+    private function onRequest(Request $request, ProtocolHandlerInterface $protocol, ?\Closure $disconnectTrigger = null): void
     {
         $item = new Http11PipelineItem();
+        $item->request = $request;
+        $item->disconnectTrigger = $disconnectTrigger;
+
         $this->pipelineQueue[] = $item;
 
         if (\count($this->pipelineQueue) >= $this->maxConcurrentRequestsPerConnection) {
@@ -231,7 +263,16 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         $connection = $protocolHandler->connection;
 
         $onComplete = function () use ($connection): void {
-            array_shift($this->pipelineQueue);
+            $popped = array_shift($this->pipelineQueue);
+
+            // Memory Leak Prevention: Sever references so GC can collect the Request/Response
+            if ($popped !== null) {
+                $popped->request = null;
+                $popped->disconnectTrigger = null;
+                $popped->response = null;
+                $popped->data = null;
+            }
+
             $this->isFlushing = false;
 
             if (\count($this->pipelineQueue) < $this->maxConcurrentRequestsPerConnection) {

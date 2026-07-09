@@ -159,6 +159,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private ?string $keepAliveTimerId = null;
 
+    private ?\Closure $currentDisconnectTrigger = null;
+
     /**
      * @inheritDoc
      */
@@ -189,7 +191,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     /**
      * @param ConnectionInterface $connection The raw TCP/TLS connection
-     * @param callable(Request, ProtocolHandlerInterface): void $onRequest Callback triggered when a full request is parsed
+     * @param callable(Request, ProtocolHandlerInterface, ?\Closure): void $onRequest Callback triggered when a full request is parsed
      * @param int $maxBodySize Default body limit for Request Helper DX methods (e.g. getBufferedBody).
      * @param int $maxHeaderSize Maximum total size of the header block in bytes.
      * @param int $maxHeaderCount Maximum number of header fields allowed per request.
@@ -508,7 +510,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         // Trigger the user's application logic IMMEDIATELY
         $this->activeRequestsCount++;
         if (\is_callable($this->onRequest)) {
-            ($this->onRequest)($request, $this);
+            ($this->onRequest)($request, $this, $this->currentDisconnectTrigger);
+            $this->currentDisconnectTrigger = null;
         }
 
         if ($this->isChunked) {
@@ -766,7 +769,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             maxBodySize: $this->maxBodySize,
             maxHeaderSize: $this->maxHeaderSize,
             maxUploadedFiles: $this->maxUploadedFiles,
-            maxFormFields: $this->maxFormFields
+            maxFormFields: $this->maxFormFields,
+            disconnectTriggerAssigner: function (\Closure $trigger): void {
+                $this->currentDisconnectTrigger = $trigger;
+            }
         );
 
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
@@ -1157,6 +1163,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         $this->currentRequest = null;
         $this->bodyStream = null;
+        $this->currentDisconnectTrigger = null;
         $this->isChunked = false;
         $this->expectedBodyLength = 0;
         $this->bytesRead = 0;

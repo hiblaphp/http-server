@@ -31,6 +31,18 @@ class Request extends AbstractMessage
     private ?string $cachedBody = null;
 
     /**
+     * Callbacks to execute if the client disconnects before the request completes.
+     *
+     * @var list<callable(): void>
+     */
+    private array $disconnectCallbacks = [];
+
+    /**
+     * Tracks if the client connection has dropped.
+     */
+    private bool $isDisconnected = false;
+
+    /**
      * For incoming Requests from the server, this is always a ReadableStreamInterface.
      */
     public string|ReadableStreamInterface $body {
@@ -51,6 +63,7 @@ class Request extends AbstractMessage
      * @param int $maxHeaderSize Internal limit for multipart header parsing
      * @param int $maxUploadedFiles Internal limit for multipart files
      * @param int $maxFormFields Internal limit for multipart fields
+     * @param (\Closure(\Closure): void)|null $disconnectTriggerAssigner Internal callback trap for connection management
      */
     public function __construct(
         public private(set) string $method,
@@ -62,11 +75,77 @@ class Request extends AbstractMessage
         private int $maxBodySize = 10485760,
         private int $maxHeaderSize = 16384,
         private int $maxUploadedFiles = 20,
-        private int $maxFormFields = 1000
+        private int $maxFormFields = 1000,
+        private ?\Closure $disconnectTriggerAssigner = null
     ) {
         $this->headers = $this->normalizeHeaders($headers);
         $this->body = $body;
         $this->protocolVersion = $protocolVersion;
+
+        // Safely hand the private trigger back to the Protocol Handler, then destroy the assigner to prevent leaks
+        if ($this->disconnectTriggerAssigner !== null) {
+            ($this->disconnectTriggerAssigner)($this->handleClientDisconnect(...));
+            $this->disconnectTriggerAssigner = null;
+        }
+    }
+
+    /**
+     * Register a callback to execute if the client disconnects before the request completes.
+     * Useful for reacting by aborting database queries, stopping SSE streams, or cleanup.
+     *
+     * @param callable(): void $callback
+     *
+     * @return static
+     */
+    public function onClientDisconnect(callable $callback): static
+    {
+        if ($this->isDisconnected) {
+            Loop::addFiber(new \Fiber(function () use ($callback): void {
+                try {
+                    $callback();
+                } catch (\Throwable) {
+                }
+            }));
+
+            return $this;
+        }
+
+        $this->disconnectCallbacks[] = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Check if the client has dropped the connection.
+     */
+    public function isDisconnected(): bool
+    {
+        return $this->isDisconnected;
+    }
+
+    /**
+     * Private method exposed ONLY to the HTTP engine via the constructor assigner.
+     * Executes all registered callbacks and aggressively clears them to prevent memory leaks.
+     */
+    private function handleClientDisconnect(): void
+    {
+        if ($this->isDisconnected) {
+            return;
+        }
+
+        $this->isDisconnected = true;
+
+        $callbacks = $this->disconnectCallbacks;
+        $this->disconnectCallbacks = [];
+
+        foreach ($callbacks as $callback) {
+            Loop::addFiber(new \Fiber(function () use ($callback): void {
+                try {
+                    $callback();
+                } catch (\Throwable) {
+                }
+            }));
+        }
     }
 
     /**

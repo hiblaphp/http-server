@@ -12,29 +12,29 @@ use Hibla\Stream\Util;
 
 /**
  * A specialized asynchronous stream implementation of Server-Sent Events (SSE).
- * 
+ *
  * This stream implements the WHATWG HTML Living Standard (Section 9.2) wire format
  * and communication protocol to stream real-time events over a persistent HTTP channel
  * to EventSource browser clients.
- * 
+ *
  * ### Standard Compliance Highlights:
- * - **Section 9.2.5 (Framing & Delimiters)**: Separates fields with a compliant single LF (\n) 
- *   delimiter and dispatches events correctly by appending a trailing empty line (\n\n) which 
+ * - **Section 9.2.5 (Framing & Delimiters)**: Separates fields with a compliant single LF (\n)
+ *   delimiter and dispatches events correctly by appending a trailing empty line (\n\n) which
  *   triggers immediate browser-side event emission.
  * - **Section 9.2.6 (Interpreting & Wire Format)**: Enforces precise colon-space delimiter
- *   formatting (e.g., `data: `, `event: `, `id: `, `retry: `) which is parsed literally and 
+ *   formatting (e.g., `data: `, `event: `, `id: `, `retry: `) which is parsed literally and
  *   accurately by user-agent parsers.
- * - **Section 9.2.7 (Keep-Alive Comments)**: Exposes a `ping()` method to stream unparsed 
- *   comment lines (prefixed with a `:` colon) every few seconds to mitigate premature 
+ * - **Section 9.2.7 (Keep-Alive Comments)**: Exposes a `ping()` method to stream unparsed
+ *   comment lines (prefixed with a `:` colon) every few seconds to mitigate premature
  *   connection termination by proxy servers, reverse-proxies, or cloud load balancers.
- * 
+ *
  * ### Concurrency & Flow Control:
  * To prevent high CPU utilization and memory exhaustion under heavy loads, this class coordinates
- * background execution using a dedicated background Fiber. It tracks its own backpressure states 
- * using internal flags, pausing and resuming background loop cycles only when TCP buffer saturation 
- * warrants, leaving application-level asynchronous delays (like database calls or sleep timers) 
+ * background execution using a dedicated background Fiber. It tracks its own backpressure states
+ * using internal flags, pausing and resuming background loop cycles only when TCP buffer saturation
+ * warrants, leaving application-level asynchronous delays (like database calls or sleep timers)
  * undisturbed.
- * 
+ *
  * @see https://html.spec.whatwg.org/multipage/server-sent-events.html
  */
 class SseStream extends EventEmitter implements ReadableStreamInterface
@@ -158,7 +158,7 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
     /**
      * Emits a standard-compliant SSE comment block (a line prefixed with a colon).
      * Used primarily for keeping connections alive through proxy timeouts.
-     * 
+     *
      * @see Section 9.2.7 - Connection Keep-Alive Comments
      */
     public function ping(?string $comment = 'ping'): void
@@ -173,7 +173,7 @@ class SseStream extends EventEmitter implements ReadableStreamInterface
             return;
         }
 
-        $commentLine = $comment !== null ? ": " . str_replace("\n", ' ', $comment) : ":";
+        $commentLine = $comment !== null ? ': ' . str_replace("\n", ' ', $comment) : ':';
         $this->emit('data', ["{$commentLine}\n\n"]);
     }
 }

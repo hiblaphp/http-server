@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Hibla\HttpServer\Internals;
 
+use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 
 /**
@@ -20,4 +21,8 @@ final class Http11PipelineItem
     public ?string $data = null;
 
     public ?Response $response = null;
+
+    public ?Request $request = null;
+
+    public ?\Closure $disconnectTrigger = null;
 }

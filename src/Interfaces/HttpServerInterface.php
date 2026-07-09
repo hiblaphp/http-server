@@ -154,6 +154,16 @@ interface HttpServerInterface
     public function onError(callable $errorHandler): static;
 
     /**
+     * Register a global callback that fires when a client unexpectedly drops the TCP connection
+     * before the request has been fully responded to.
+     *
+     * @param callable(Request): void $callback
+     *
+     * @return static
+     */
+    public function onClientDisconnect(callable $callback): static;
+
+    /**
      * Register a late-stage runtime callback to be executed once per process immediately
      * before the HTTP server binds to its socket and starts accepting connections.
      *
@@ -184,7 +194,7 @@ interface HttpServerInterface
     /**
      * Register the primary request handler for the HTTP server.
      *
-     * @param callable(Request): (Response|null) $requestHandler
+     * @param callable(Request, ProtocolHandlerInterface): (Response|null) $requestHandler
      *
      * @return static
      */

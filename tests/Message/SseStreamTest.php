@@ -149,7 +149,7 @@ it('integrates with the real Event Loop to schedule and resume suspended fibers 
 
 it('does not forcefully resume a fiber suspended by application logic during stream resume', function () {
     $stream = new SseStream(function (SseStream $stream) {
-        \Fiber::suspend();
+        Fiber::suspend();
     });
 
     $fiber = getPrivateProperty($stream, 'emitterFiber');

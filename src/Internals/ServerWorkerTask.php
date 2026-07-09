@@ -44,6 +44,7 @@ final class ServerWorkerTask
      * @param int $maxUploadedFiles
      * @param int $maxFormFields
      * @param (callable(\Throwable, Request): (Response|null))|null $errorHandler
+     * @param (callable(Request): void)|null $onClientDisconnect
      */
     public function __construct(
         private readonly string $uri,
@@ -63,7 +64,8 @@ final class ServerWorkerTask
         private readonly int $maxConcurrentRequestsPerConnection = 128,
         private readonly int $maxUploadedFiles = 20,
         private readonly int $maxFormFields = 1000,
-        private readonly mixed $errorHandler = null
+        private readonly mixed $errorHandler = null,
+        private readonly mixed $onClientDisconnect = null
     ) {
     }
 
@@ -96,7 +98,8 @@ final class ServerWorkerTask
             $this->maxConcurrentRequestsPerConnection,
             $this->maxUploadedFiles,
             $this->maxFormFields,
-            $this->errorHandler
+            $this->errorHandler,
+            $this->onClientDisconnect
         );
 
         $gracefulShutdownTimeout = $this->gracefulShutdownTimeout;
