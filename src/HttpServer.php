@@ -79,6 +79,8 @@ final class HttpServer implements HttpServerInterface
 
     private ?float $keepAliveTimeout = null;
 
+    private ?int $keepAliveMaxRequests = null;
+
     /**
      * @var int Limit for concurrent requests per TCP connection
      */
@@ -370,6 +372,21 @@ final class HttpServer implements HttpServerInterface
     /**
      * {@inheritdoc}
      */
+    public function withKeepAliveMaxRequests(?int $limit): static
+    {
+        if ($limit !== null && $limit < 1) {
+            throw new InvalidConfigurationException('Keep-alive max requests limit must be at least 1.');
+        }
+
+        $clone = clone $this;
+        $clone->keepAliveMaxRequests = $limit;
+
+        return $clone;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function withGracefulShutdownTimeout(float $seconds): static
     {
         if ($seconds <= 0) {
@@ -464,7 +481,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxUploadedFiles,
             $this->maxFormFields,
             $this->errorHandler,
-            $this->onClientDisconnectHandler
+            $this->onClientDisconnectHandler,
+            $this->keepAliveMaxRequests
         );
 
         $this->setupSignalHandlers(function () use ($triggerShutdown) {
@@ -519,7 +537,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxUploadedFiles,
             $this->maxFormFields,
             $this->errorHandler,
-            $this->onClientDisconnectHandler
+            $this->onClientDisconnectHandler,
+            $this->keepAliveMaxRequests
         );
 
         $this->setupSignalHandlers(function () use ($socket, $triggerShutdown) {
@@ -572,7 +591,8 @@ final class HttpServer implements HttpServerInterface
             $this->maxUploadedFiles,
             $this->maxFormFields,
             $this->errorHandler,
-            $this->onClientDisconnectHandler
+            $this->onClientDisconnectHandler,
+            $this->keepAliveMaxRequests
         );
 
         $isShuttingDown = false;
@@ -724,7 +744,8 @@ final class HttpServer implements HttpServerInterface
         int $maxUploadedFiles = 20,
         int $maxFormFields = 1000,
         ?callable $errorHandler = null,
-        ?callable $onClientDisconnect = null
+        ?callable $onClientDisconnect = null,
+        ?int $keepAliveMaxRequests = null
     ): callable {
         /** @var array<int, ConnectionManagerInterface> $activeManagers */
         $activeManagers = [];
@@ -743,7 +764,8 @@ final class HttpServer implements HttpServerInterface
             $maxUploadedFiles,
             $maxFormFields,
             $errorHandler,
-            $onClientDisconnect
+            $onClientDisconnect,
+            $keepAliveMaxRequests,
         ): void {
 
             $manager = new Http11ConnectionManager(
@@ -759,7 +781,8 @@ final class HttpServer implements HttpServerInterface
                 $maxUploadedFiles,
                 $maxFormFields,
                 $errorHandler,
-                $onClientDisconnect
+                $onClientDisconnect,
+                $keepAliveMaxRequests
             );
 
             $managerId = spl_object_id($manager);

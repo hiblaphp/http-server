@@ -1166,5 +1166,64 @@ describe('Application Exception Handling (onError)', function () {
             $socket->close();
         }
     });
+});
+
+describe('Keep-Alive Max Requests Limit Integration', function () {
+    it('gracefully closes the real client connection once the max requests limit is reached', function () {
+        [$socket, $url] = createTestServer(
+            requestHandler: function (ServerRequest $request) {
+                return ServerResponse::plaintext('Req: ' . $request->uri);
+            },
+            keepAliveMaxRequests: 3
+        );
+
+        try {
+            $rawClient = new Connector();
+            $connection = await($rawClient->connect(str_replace('http://', 'tcp://', $url)));
+
+            $responses = [];
+            $closed = false;
+
+            $connection->on('data', function ($chunk) use (&$responses) {
+                $responses[] = $chunk;
+            });
+
+            $connectionClosedPromise = new Promise(function ($resolve) use ($connection, &$closed) {
+                $connection->on('close', function () use (&$closed, $resolve) {
+                    $closed = true;
+                    $resolve(true);
+                });
+            });
+
+            $connection->write("GET /1 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            await(delay(0.05));
+
+            $connection->write("GET /2 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            await(delay(0.05));
+
+            $connection->write("GET /3 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+            await($connectionClosedPromise);
+
+            $fullOutput = implode('', $responses);
+
+            expect($fullOutput)->toContain('Req: /1')
+                ->and($fullOutput)->toContain('Req: /2')
+                ->and($fullOutput)->toContain('Req: /3')
+                ->and($closed)->toBeTrue()
+            ;
+
+            $responseParts = explode('HTTP/1.1 200 OK', $fullOutput);
+
+            expect(count($responseParts))->toBe(4)
+                ->and($responseParts[1])->not->toContain('Connection: close')
+                ->and($responseParts[2])->not->toContain('Connection: close')
+                ->and($responseParts[3])->toContain('Connection: close')
+            ;
+
+        } finally {
+            $socket->close();
+        }
+    });
 
 });

@@ -75,6 +75,9 @@ use Hibla\Stream\Interfaces\ReadableStreamInterface;
  * - keepAliveTimeout limits the time a persistent connection can remain idle
  *   before being gracefully closed, preventing resource starvation.
  *
+ * - keepAliveMaxRequests limits the total number of requests a single persistent
+ *   connection can serve before being gracefully closed, preventing connection holding.
+ *
  * - maxHeaderSize (default 16 KiB) caps header block accumulation to prevent memory
  *   exhaustion from clients that never send the "\r\n\r\n" terminator (→ 431).
  *
@@ -130,6 +133,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
     private bool $willCloseConnection = false;
 
     private int $state = self::STATE_HEADERS;
+
+    private int $requestsProcessed = 0;
 
     private int $expectedBodyLength = 0;
 
@@ -201,6 +206,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
      * @param float|null $keepAliveTimeout Maximum idle time allowed before closing a persistent connection.
      * @param int $maxUploadedFiles Maximum number of uploaded files in multipart content type.
      * @param int $maxFormFields maximum number of array of bodys in a multipart request.
+     * @param int|null $keepAliveMaxRequests Maximum requests per connection before closing.
      */
     public function __construct(
         public private(set) ConnectionInterface $connection,
@@ -213,7 +219,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         private readonly ?float $requestTimeout = null,
         private readonly ?float $keepAliveTimeout = null,
         private readonly int $maxUploadedFiles = 20,
-        private readonly int $maxFormFields = 1000
+        private readonly int $maxFormFields = 1000,
+        private readonly ?int $keepAliveMaxRequests = null
     ) {
         $this->handleConnectionCloseEvent();
         $this->startHeaderTimer();
@@ -775,6 +782,8 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         );
 
+        $this->requestsProcessed++;
+
         $this->determineConnectionPersistence($protocolVersion, $this->currentRequest->getHeaderLine('connection'), $forceClose);
     }
 
@@ -956,6 +965,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private function determineConnectionPersistence(string $protocolVersion, string $connHeader, bool $forceClose): void
     {
+        // Enforce the keep-alive request limit, triggering a graceful closure
+        if ($this->keepAliveMaxRequests !== null && $this->requestsProcessed >= $this->keepAliveMaxRequests) {
+            $forceClose = true;
+        }
+
         $connHeader = strtolower($connHeader);
         if ($protocolVersion === '1.0') {
             $this->willCloseConnection = $forceClose || ($connHeader !== 'keep-alive');
@@ -985,7 +999,11 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
         $shouldClose = $this->willCloseConnection || strtolower($response->getHeaderLine('connection')) === 'close';
 
-        if ($shouldClose) {
+        // 101 Switching Protocols implies the connection is upgraded and hijacked.
+        // We ignore any 'close' directives to allow the upgrade to proceed cleanly.
+        if ($response->statusCode === 101) {
+            $shouldClose = false;
+        } elseif ($shouldClose) {
             $headers['connection'] = ['close'];
         } elseif ($version === '1.0' && ! isset($headers['connection'])) {
             $headers['connection'] = ['keep-alive'];

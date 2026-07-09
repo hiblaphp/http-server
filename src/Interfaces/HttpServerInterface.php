@@ -142,6 +142,16 @@ interface HttpServerInterface
     public function withKeepAliveTimeout(?float $seconds): static;
 
     /**
+     * Set the maximum number of requests allowed over a single persistent (keep-alive) connection.
+     * Once reached, the connection will be gracefully closed.
+     *
+     * @param int|null $limit Maximum requests per connection (null for unlimited).
+     *
+     * @return static
+     */
+    public function withKeepAliveMaxRequests(?int $limit): static;
+
+    /**
      * Register a custom error handler to intercept uncaught exceptions from the request handler.
      *
      * Allows framework developers to render beautiful HTML error pages (like Whoops/Ignition)

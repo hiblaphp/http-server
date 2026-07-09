@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Hibla\EventLoop\Loop;
+use Hibla\HttpServer\Exceptions\StreamClosedException;
 use Hibla\HttpServer\Message\SseStream;
 
 afterEach(function () {
@@ -68,7 +69,7 @@ it('splits multiline data into multiple data prefix lines', function () {
     expect($emittedPayload)->toBe($expected);
 });
 
-it('does not emit events once closed', function () {
+it('throws StreamClosedException and does not emit events once closed', function () {
     $stream = new SseStream();
     $emittedCount = 0;
 
@@ -79,7 +80,9 @@ it('does not emit events once closed', function () {
     $stream->send('First Event');
     $stream->close();
 
-    $stream->send('Second Event');
+    expect(fn () => $stream->send('Second Event'))
+        ->toThrow(StreamClosedException::class, 'Cannot send data; SSE stream is closed.')
+    ;
 
     expect($emittedCount)->toBe(1);
 });

@@ -195,9 +195,6 @@ function createCloseableMockConnection(string &$buffer): ConnectionInterface
 /**
  * @return array{0: SocketServer, 1: string}
  */
-/**
- * @return array{0: SocketServer, 1: string}
- */
 function createTestServer(
     callable $requestHandler,
     int $maxBodySize = 10485760,
@@ -212,7 +209,8 @@ function createTestServer(
     int $maxUploadedFiles = 20,
     int $maxFormFields = 1000,
     ?callable $errorHandler = null,
-    ?callable $onClientDisconnect = null
+    ?callable $onClientDisconnect = null,
+    ?int $keepAliveMaxRequests = null
 ): array {
     $scheme = isset($context['tls']) ? 'tls://' : 'tcp://';
     $socket = new SocketServer($scheme . '127.0.0.1:0', $context);
@@ -231,7 +229,8 @@ function createTestServer(
         $maxUploadedFiles,
         $maxFormFields,
         $errorHandler,
-        $onClientDisconnect
+        $onClientDisconnect,
+        $keepAliveMaxRequests
     );
 
     $url = str_replace(['tcp://', 'tls://'], ['http://', 'https://'], $socket->getAddress());

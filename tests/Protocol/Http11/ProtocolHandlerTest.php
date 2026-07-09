@@ -276,3 +276,55 @@ it('automatically sends a 100 Continue response when the Expect header is presen
         ->and(await($parsedRequest->getBufferedBody()))->toBe('hello world')
     ;
 });
+
+it('appends Connection: close and forcefully drops the connection when the keep-alive limit is reached', function () {
+    $buffer = '';
+    $connection = mockConnection($buffer, expectClose: true);
+
+    $handler = new Http11ProtocolHandler(
+        $connection,
+        function (Request $request, ProtocolHandlerInterface $protocol) {
+            $protocol->writeResponse(new Response(200, [], 'OK'));
+        },
+        keepAliveMaxRequests: 2
+    );
+
+    $handler->handleData("GET /1 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    await(delay(0.01));
+
+    expect($buffer)->toContain('HTTP/1.1 200 OK')
+        ->and($buffer)->not->toContain('Connection: close')
+    ;
+
+    $buffer = '';
+
+    $handler->handleData("GET /2 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    await(delay(0.01));
+
+    expect($buffer)->toContain('HTTP/1.1 200 OK')
+        ->and($buffer)->toContain('Connection: close')
+    ;
+});
+
+it('bypasses the keep-alive limit if the response is an upgraded connection (101 Switching Protocols)', function () {
+    $buffer = '';
+
+    $connection = mockConnection($buffer, expectClose: false);
+
+    $handler = new Http11ProtocolHandler(
+        $connection,
+        function (Request $request, ProtocolHandlerInterface $protocol) {
+            $protocol->writeResponse(new Response(101, ['Upgrade' => 'websocket', 'Connection' => 'Upgrade']));
+            $protocol->detach();
+        },
+        keepAliveMaxRequests: 1
+    );
+
+    $handler->handleData("GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n\r\n");
+    await(delay(0.01));
+
+    expect($buffer)->toContain('HTTP/1.1 101 Switching Protocols')
+        ->and($buffer)->toContain('Connection: Upgrade')
+        ->and($buffer)->not->toContain('Connection: close')
+    ;
+});

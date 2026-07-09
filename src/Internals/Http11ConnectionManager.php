@@ -47,6 +47,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
      * @param int $maxFormFields
      * @param (callable(\Throwable, Request): (Response|null))|null $errorHandler
      * @param (callable(Request): void)|null $onClientDisconnect
+     * @param int|null $keepAliveMaxRequests Maximum requests per connection before closing.
      */
     public function __construct(
         callable $requestHandler,
@@ -61,7 +62,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         private readonly int $maxUploadedFiles = 20,
         private readonly int $maxFormFields = 1000,
         private readonly mixed $errorHandler = null,
-        private readonly mixed $onClientDisconnect = null
+        private readonly mixed $onClientDisconnect = null,
+        private readonly ?int $keepAliveMaxRequests = null
     ) {
         $this->requestHandler = $requestHandler;
     }
@@ -79,7 +81,8 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             $this->requestTimeout,
             $this->keepAliveTimeout,
             $this->maxUploadedFiles,
-            $this->maxFormFields
+            $this->maxFormFields,
+            $this->keepAliveMaxRequests
         );
 
         $this->protocolHandler->onEarlyResponse = function (string $data) use ($connection): void {
