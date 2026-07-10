@@ -446,13 +446,22 @@ class Request extends AbstractMessage
         return new Promise(function (callable $resolve, callable $reject, callable $onCancel) use ($boundary, $onFile, $onField, $body) {
             $parser = new MultipartParser($boundary);
 
-            $state = new class () {
+            $state = new class() {
                 public int $pendingFibers = 0;
-
                 public bool $parserEnded = false;
             };
 
-            $parser->on('file', function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use ($onFile, $state, $resolve, $reject): void {
+            $fileCount = 0;
+            $fieldCount = 0;
+            $maxFiles = $this->maxUploadedFiles;
+            $maxFields = $this->maxFormFields;
+
+            $parser->on('file', function (string $name, string $filename, string $mime, PromiseReadableStreamInterface $fileStream) use ($onFile, $state, $resolve, $reject, &$fileCount, $maxFiles, $parser): void {
+                if (++$fileCount > $maxFiles) {
+                    $parser->emit('error', [new MultipartException('Too many file uploads in multipart body')]);
+                    return;
+                }
+
                 $state->pendingFibers++;
 
                 $fiber = new \Fiber(function () use ($onFile, $name, $filename, $mime, $fileStream, $state, $resolve, $reject): void {
@@ -472,7 +481,12 @@ class Request extends AbstractMessage
             });
 
             if ($onField !== null) {
-                $parser->on('field', function (string $name, string $value) use ($onField, $state, $resolve, $reject): void {
+                $parser->on('field', function (string $name, string $value) use ($onField, $state, $resolve, $reject, &$fieldCount, $maxFields, $parser): void {
+                    if (++$fieldCount > $maxFields) {
+                        $parser->emit('error', [new MultipartException('Too many form fields in multipart body')]);
+                        return;
+                    }
+
                     $state->pendingFibers++;
 
                     $fiber = new \Fiber(function () use ($onField, $name, $value, $state, $resolve, $reject): void {
