@@ -29,6 +29,11 @@ class RequestBodyStream extends EventEmitter implements ReadableStreamInterface
     private bool $ended = false;
 
     /**
+     * @var \Closure(): void|null
+     */
+    public ?\Closure $onStartReading = null;
+
+    /**
      * @inheritDoc
      */
     public function isReadable(): bool
@@ -110,6 +115,11 @@ class RequestBodyStream extends EventEmitter implements ReadableStreamInterface
         if ($event === 'data' && ! $this->hasDataListener) {
             $this->hasDataListener = true;
 
+            if ($this->onStartReading !== null) {
+                ($this->onStartReading)();
+                $this->onStartReading = null;
+            }
+
             if ($this->buffer !== '' || $this->ended) {
                 Loop::nextTick(function () {
                     if (! $this->readable) {
@@ -122,8 +132,6 @@ class RequestBodyStream extends EventEmitter implements ReadableStreamInterface
                         $this->emit('data', [$data]);
                     }
 
-                    // PHPStan believes $this->readable is always true here, but $this->emit()
-                    // is impure and can trigger a close() callback, changing the state.
                     // @phpstan-ignore booleanAnd.rightAlwaysTrue
                     if ($this->ended && $this->readable) {
                         $this->emit('end');

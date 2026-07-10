@@ -14,11 +14,11 @@ use Hibla\HttpServer\Message\Response;
  */
 final class Http11PipelineItem
 {
-    public bool $isEarly = false;
-
     public bool $isReady = false;
 
-    public ?string $data = null;
+    public ?string $earlyResponse = null;
+
+    public bool $earlyResponseSent = false;
 
     public ?Response $response = null;
 

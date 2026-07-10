@@ -249,7 +249,7 @@ it('responds with 400 Bad Request and terminates when the request line is struct
     ;
 });
 
-it('automatically sends a 100 Continue response when the Expect header is present', function () {
+it('defers sending a 100 Continue response until the application actually reads the body', function () {
     $writtenBuffer = '';
     $connection = mockConnection($writtenBuffer);
 
@@ -266,15 +266,17 @@ it('automatically sends a 100 Continue response when the Expect header is presen
 
     $handler->handleData($rawHeaders);
 
-    expect($writtenBuffer)->toBe("HTTP/1.1 100 Continue\r\n\r\n")
+    expect($writtenBuffer)->toBe('')
         ->and($parsedRequest)->not->toBeNull()
     ;
 
+    $bodyPromise = $parsedRequest->getBufferedBody();
+
+    expect($writtenBuffer)->toBe("HTTP/1.1 100 Continue\r\n\r\n");
+
     $handler->handleData('hello world');
 
-    expect($parsedRequest)->not->toBeNull()
-        ->and(await($parsedRequest->getBufferedBody()))->toBe('hello world')
-    ;
+    expect(await($bodyPromise))->toBe('hello world');
 });
 
 it('appends Connection: close and forcefully drops the connection when the keep-alive limit is reached', function () {

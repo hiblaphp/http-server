@@ -85,21 +85,6 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             $this->keepAliveMaxRequests
         );
 
-        $this->protocolHandler->onEarlyResponse = function (string $data) use ($connection): void {
-            $item = new Http11PipelineItem();
-            $item->isEarly = true;
-            $item->data = $data;
-            $item->isReady = true;
-
-            $this->pipelineQueue[] = $item;
-
-            if (\count($this->pipelineQueue) >= $this->maxConcurrentRequestsPerConnection) {
-                $connection->pause();
-            }
-
-            $this->flushQueue();
-        };
-
         $connection->on('close', function (): void {
             // Trigger disconnects for any requests that haven't finished processing
             foreach ($this->pipelineQueue as $item) {
@@ -160,6 +145,15 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         $item = new Http11PipelineItem();
         $item->request = $request;
         $item->disconnectTrigger = $disconnectTrigger;
+
+        $body = $request->body;
+
+        if ($body instanceof RequestBodyStream && $body->onStartReading !== null) {
+            $body->onStartReading = function () use ($item) {
+                $item->earlyResponse = "HTTP/1.1 100 Continue\r\n\r\n";
+                $this->flushQueue();
+            };
+        }
 
         $this->pipelineQueue[] = $item;
 
@@ -258,12 +252,20 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
         }
 
         $head = $this->pipelineQueue[0];
+        $connection = $protocolHandler->connection;
+
+        // Ensure 100 Continue (if applicable) is sent strictly in sequence
+        if ($head->earlyResponse !== null && ! $head->earlyResponseSent) {
+            $head->earlyResponseSent = true;
+            $connection->write($head->earlyResponse);
+        }
+
+        // Wait for the final response to be ready
         if (! $head->isReady) {
             return;
         }
 
         $this->isFlushing = true;
-        $connection = $protocolHandler->connection;
 
         $onComplete = function () use ($connection): void {
             $popped = array_shift($this->pipelineQueue);
@@ -273,7 +275,7 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
                 $popped->request = null;
                 $popped->disconnectTrigger = null;
                 $popped->response = null;
-                $popped->data = null;
+                $popped->earlyResponse = null;
             }
 
             $this->isFlushing = false;
@@ -285,28 +287,21 @@ final class Http11ConnectionManager implements ConnectionManagerInterface
             $this->flushQueue();
         };
 
-        if ($head->isEarly) {
-            if (\is_string($head->data)) {
-                $connection->write($head->data);
-            }
-            $onComplete();
-        } else {
-            if ($head->response instanceof Response && ! $protocolHandler->isUpgraded()) {
+        if ($head->response instanceof Response && ! $protocolHandler->isUpgraded()) {
+            try {
+                $protocolHandler->writeResponse($head->response, $onComplete);
+            } catch (\Throwable $e) {
                 try {
-                    $protocolHandler->writeResponse($head->response, $onComplete);
-                } catch (\Throwable $e) {
-                    try {
-                        $errorResponse = $this->createFallbackErrorResponse($e);
-                        $protocolHandler->writeResponse($errorResponse, $onComplete);
-                    } catch (\Throwable) {
-                        $connection->close();
-                        $onComplete();
-                    }
+                    $errorResponse = $this->createFallbackErrorResponse($e);
+                    $protocolHandler->writeResponse($errorResponse, $onComplete);
+                } catch (\Throwable) {
+                    $connection->close();
+                    $onComplete();
                 }
-            } else {
-                $protocolHandler->decrementActiveRequests();
-                $onComplete();
             }
+        } else {
+            $protocolHandler->decrementActiveRequests();
+            $onComplete();
         }
     }
 }

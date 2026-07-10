@@ -164,25 +164,19 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
 
     private ?string $keepAliveTimerId = null;
 
+    private static ?string $cachedDateHeader = null;
+
     private ?\Closure $currentDisconnectTrigger = null;
-
-    /**
-     * @inheritDoc
-     */
-    public private(set) int $activeRequestsCount = 0;
-
-    /**
-     * Callback triggered when the parser naturally responds with a 100 Continue.
-     * Exposed to the Server layer to safely sequence pipelined responses.
-     *
-     * @var \Closure(string): void|null
-     */
-    public ?\Closure $onEarlyResponse = null;
 
     /**
      * @var array<string, mixed>|null
      */
     private ?array $serverParamsCache = null;
+
+    /**
+     * @inheritDoc
+     */
+    public private(set) int $activeRequestsCount = 0;
 
     /**
      * Per-process cache mapping lowercase wire-format header names (e.g. "content-type")
@@ -507,20 +501,18 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             return false;
         }
 
-        // RFC 9110 Section 10.1.1: Automatically signal the client to send the body
-        // if the headers were successfully parsed and accepted.
-        if (strtolower($request->getHeaderLine('expect')) === '100-continue') {
-            if ($this->onEarlyResponse !== null) {
-                ($this->onEarlyResponse)("HTTP/1.1 100 Continue\r\n\r\n");
-            } else {
-                $this->connection->write("HTTP/1.1 100 Continue\r\n\r\n");
-            }
-        }
-
         // Initialize the stream and attach it to the request unconditionally
         $this->bodyStream = new RequestBodyStream();
         $this->bodyStream->on('pause', $this->connection->pause(...));
         $this->bodyStream->on('resume', $this->connection->resume(...));
+
+        // Lazy 100-Continue implementation
+        if (strtolower($request->getHeaderLine('expect')) === '100-continue') {
+            $this->bodyStream->onStartReading = function (): void {
+                $this->connection->write("HTTP/1.1 100 Continue\r\n\r\n");
+            };
+        }
+
         $request->body = $this->bodyStream;
 
         // Trigger the user's application logic IMMEDIATELY
@@ -999,6 +991,10 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             $headers['server'] = ['Hibla/1.0'];
         }
 
+        if (! isset($headers['date']) && $response->statusCode >= 200) {
+            $headers['date'] = [self::getCachedDateHeader()];
+        }
+
         if ($isStreamingOut && ! isset($headers['content-length'])) {
             $isChunkedResponse = true;
             $headers['transfer-encoding'] = ['chunked'];
@@ -1472,7 +1468,7 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
             }
         }
 
-        return $this->serverParamsCache = array_filter($params, fn ($val) => $val !== null);
+        return $this->serverParamsCache = array_filter($params, fn($val) => $val !== null);
     }
 
     /**
@@ -1498,5 +1494,24 @@ class Http11ProtocolHandler implements ProtocolHandlerInterface
         }
 
         return [(string) $address, null];
+    }
+
+    private static function getCachedDateHeader(): string
+    {
+        if (self::$cachedDateHeader !== null) {
+            return self::$cachedDateHeader;
+        }
+
+        $now = microtime(true);
+        self::$cachedDateHeader = gmdate('D, d M Y H:i:s', (int) $now) . ' GMT';
+
+        $msIntoSecond = ($now - floor($now)) * 1000;
+        $delay = max(0.0, (1000 - $msIntoSecond) / 1000);
+
+        Loop::addTimer($delay, function () {
+            self::$cachedDateHeader = null;
+        });
+
+        return self::$cachedDateHeader;
     }
 }

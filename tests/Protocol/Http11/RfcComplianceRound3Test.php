@@ -7,6 +7,9 @@ use Hibla\HttpServer\Message\Request;
 use Hibla\HttpServer\Message\Response;
 use Hibla\HttpServer\Protocol\Http11ProtocolHandler;
 
+use function Hibla\await;
+use function Hibla\delay;
+
 describe('RFC 9112 section 7.1 — Strict Chunk Size Parsing', function () {
 
     it('rejects a chunk size containing non-hex characters (e.g., 5Z) to prevent TE.TE smuggling', function () {
@@ -30,7 +33,6 @@ describe('RFC 9112 section 7.1 — Strict Chunk Size Parsing', function () {
             ->and($requestReached)->toBeTrue()
         ;
     });
-
 });
 
 describe('RFC 9112 section 6.1 — TE and Content-Length mandatory connection closure', function () {
@@ -54,7 +56,6 @@ describe('RFC 9112 section 6.1 — TE and Content-Length mandatory connection cl
 
         expect($buffer)->toContain('Connection: close');
     });
-
 });
 
 describe('RFC 9112 section 6.3 — Transfer-Encoding final coding status code', function () {
@@ -80,7 +81,6 @@ describe('RFC 9112 section 6.3 — Transfer-Encoding final coding status code', 
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 section 3.2 — Host Header list injection', function () {
@@ -100,7 +100,6 @@ describe('RFC 9112 section 3.2 — Host Header list injection', function () {
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 section 3.1 & 5.5 — Token and VCHAR strictness', function () {
@@ -138,7 +137,6 @@ describe('RFC 9112 section 3.1 & 5.5 — Token and VCHAR strictness', function (
             ->and($requestReached)->toBeFalse()
         ;
     });
-
 });
 
 describe('RFC 9112 sectio 6.1 — HTTP/1.0 with Transfer-Encoding must force connection closure', function () {
@@ -164,7 +162,6 @@ describe('RFC 9112 sectio 6.1 — HTTP/1.0 with Transfer-Encoding must force con
 
         expect($requestCount)->toBe(1);
     });
-
 });
 
 describe('RFC 9110 section 10.1.1 — unknown Expect directive handling', function () {
@@ -184,5 +181,53 @@ describe('RFC 9110 section 10.1.1 — unknown Expect directive handling', functi
             ->and($buffer)->not->toContain('417')
         ;
     });
+});
 
+describe('RFC 9110 Section 6.6.1 - Date Header', function () {
+
+    it('automatically appends an IMF-fixdate formatted Date header to 2xx responses', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
+            $protocol->writeResponse(new Response(200, [], 'OK'));
+        });
+
+        $handler->handleData("GET / HTTP/1.0\r\n\r\n");
+        await(delay(0.01));
+
+        expect($buffer)->toContain('HTTP/1.0 200 OK')
+            ->and($buffer)->toMatch('/Date: [A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT/')
+        ;
+    });
+
+    it('does not overwrite a Date header if the application explicitly provides one', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
+            $protocol->writeResponse(new Response(200, ['Date' => 'Custom Date'], 'OK'));
+        });
+
+        $handler->handleData("GET / HTTP/1.0\r\n\r\n");
+        await(delay(0.01));
+
+        expect($buffer)->toContain('Date: Custom Date');
+    });
+
+    it('does not append a Date header to 1xx informational responses', function () {
+        $buffer = '';
+        $connection = mockConnection($buffer, expectClose: true);
+
+        $handler = new Http11ProtocolHandler($connection, function (Request $request, ProtocolHandlerInterface $protocol) {
+            $protocol->writeResponse(new Response(103, reasonPhrase: 'Early Hints'));
+        });
+
+        $handler->handleData("GET / HTTP/1.0\r\n\r\n");
+        await(delay(0.01));
+
+        expect($buffer)->toContain('HTTP/1.0 103 Early Hints')
+            ->and($buffer)->not->toContain('Date:')
+        ;
+    });
 });
