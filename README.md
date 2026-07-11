@@ -198,7 +198,7 @@ $form = await($request->getParsedBody());
 ```
 
 Using these helpers gives you the simplicity of synchronous-looking code with the memory safety
-and speed of a non-blocking streaming engine. Cancelling any of these returned promises mid-stream will instantly cleanly abort the transfer and free up resources.
+and speed of a non-blocking streaming engine. Cancelling any of these returned promises mid-stream will instantly and cleanly abort the transfer and free up resources.
 
 ## CRITICAL: The Golden Rule (Never Block)
 
@@ -294,18 +294,23 @@ Because of this design, you do not have to pollute your code with `async` declar
 
 ### The Asynchronous Boundary Trap (And How to Bridge It)
 
-While Fibers flow infinitely downward through synchronous code (functions, closures, and constructors, and magic methods), **the Fiber context is lost the moment execution crosses an asynchronous boundary.**
+While Fibers flow infinitely downward through synchronous code (functions, closures, constructors, and magic methods), **the Fiber context is lost the moment execution crosses an asynchronous boundary.**
 
-When you hand a callback directly to the Event Loop (`Loop::nextTick`, `Loop::addTimer`) or to an asynchronous Promise combinator that takes a callback (`Promise::map`, `Promise::forEach`), that callback is *not* executed immediately on your current stack. It is stored in memory and executed later by the Event Loop directly on the main thread (`{main}`).
+When you hand a callback directly to the Event Loop (`Loop::nextTick`, `Loop::addTimer`) or to an asynchronous Promise combinator that takes a callback (`Promise::map`, `Promise::forEach`), that callback is not executed immediately on your current stack. It is stored in memory and executed later by the Event Loop directly on the main thread (`{main}`).
 
-If a callback runs on `{main}` and attempts to call `await()`, it will trigger a **blocking fallback** that freezes your entire server, destroying concurrency.
+If a callback runs on `{main}` and attempts to call `await()`, it normally triggers a **cooperative blocking fallback** that drives the event loop recursively until the promise settles. Inside a high-concurrency daemon like an HTTP server, this recursive loop re-entrancy wastes CPU cycles and degrades performance.
+
+To protect you from this, the HTTP Server automatically configures `hiblaphp/async` into **Strict Mode** at startup using `AsyncEnvironment::enableStrictAwait()` in top of your entry point. 
+
+With strict mode active, the "Wrong Way" code below will not silently degrade your performance. Instead, it will instantly throw an `InvalidContextException` pointing directly to the file and line in your code where the context was lost:
 
 #### The Wrong Way:
 ```php
 await(
     Promise::map(["hello", "world"], function ($item) {
         // DANGER: Promise::map executes this closure later on {main}, outside a Fiber!
-        // Calling await() here will BLOCK the entire server event loop!
+        // Calling await() here in Strict Mode will instantly throw an InvalidContextException
+        // pointing to the UserController.php file.
         await(delay(0.01)); 
         return strtoupper($item);
     })
@@ -330,7 +335,7 @@ await(
 
 ### Callsite Concurrency
 
-You only need to introduce the `async()` wrapper at the **callsite** when you explicitly want to run plain functions concurrently, or when passing closures to async arrays and combinators.
+You only need to introduce the `async()` wrapper at the callsite when you explicitly want to run plain functions concurrently, or when passing closures to async arrays and combinators.
 
 ```php
 use function Hibla\async;
@@ -422,7 +427,7 @@ asynchronously** without blocking the thread during disk writes.
 Calling `await($request->getParsedBody())` streams the multipart fields and writes file uploads
 into secure temporary files on disk (stored in `sys_get_temp_dir()`).
 
-> **An Honest Note on Local Disk I/O (Fake Async):** At the operating system level, standard local files do not support true non-blocking kernel watchers. When the server writes a file to your local disk, it uses **cooperative time-slicing** (writing the file in micro-chunks and yielding to the Event Loop instantly) to ensure the operation never blocks the server from processing other incoming requests. However, because PHP runs on a single thread, concurrent writes to the same physical disk will execute at roughly the same total speed as sequential writes due to hardware bounds. For massive high-traffic applications, consider **Option B** below to pipe data directly to cloud storage.
+> **An Honest Note on Local Disk I/O (Cooperative File Writing):** At the operating system level, standard local files do not support true non-blocking kernel watchers. When the server writes a file to your local disk, it uses **cooperative time-slicing** (writing the file in micro-chunks and yielding to the Event Loop instantly) to ensure the operation never blocks the server from processing other incoming requests. However, because PHP runs on a single thread, concurrent writes to the same physical disk will execute at roughly the same total speed as sequential writes due to hardware bounds. For massive high-traffic applications, consider **Option B** below to pipe data directly to cloud storage.
 
 ```php
 use Hibla\HttpServer\Message\MultipartForm;
@@ -448,9 +453,9 @@ if ($file instanceof UploadedFile) {
 
 #### Automatic Garbage Collection
 
-To prevent disk leakages, **the HTTP Server cleans up after itself.** If an `UploadedFile` object goes out
+To prevent disk leakages, the HTTP Server cleans up after itself. If an `UploadedFile` object goes out
 of scope and is garbage collected without you calling `moveTo()`, the underlying temporary file is
-**automatically and instantly deleted** from your disk.
+automatically and instantly deleted from your disk.
 
 ### Option B: Zero-Disk Async Streaming
 
@@ -607,8 +612,8 @@ so you can catch broadly or narrowly depending on your needs.
 ```text
 HttpServerException
 ├── InvalidConfigurationException     // e.g. start() called with no onRequest handler
-├── InvalidResponseException          // bad Response from handler/error-handler, or CRLF/NUL in a header value
-├── JsonEncodingException             // Response::json() couldn't encode the given data
+├── InvalidResponseException          // bad Response from handler or error-handler, or CRLF/NUL in a header value
+├── JsonEncodingException             // Response::json() given data json_encode can't serialize
 ├── MessageParsingException           // malformed request line / headers (→ 400)
 │   ├── RequestHeaderFieldsTooLargeException  // too many header fields (→ 431)
 │   └── UnsupportedTransferCodingException    // unrecognized Transfer-Encoding coding (→ 501)
@@ -650,7 +655,7 @@ Because an uncaught exception means internal state or streams may be unstable, *
 returned from `onError` automatically gets `Connection: close` appended** unless you already set
 it. The connection is not reused for a following request, even if you do not ask for that
 explicitly. If your `onError` callback itself throws an exception, or returns something other than a `Response`
-or `null`, the server falls back to the generic 500 response rather than propagating the failure.
+or null, the server falls back to the generic 500 response rather than propagating the failure.
 
 ## Lifecycle Hooks
 
@@ -736,13 +741,13 @@ Drop connections that are intentionally trickling data to tie up your sockets. A
 
 ```php
 HttpServer::create()
-    // Drop if headers take > 5s (Default: null / disabled)
+    // Drop if headers take > 5s (Default: null or disabled)
     ->withHeaderTimeout(5.0)   
     
-    // Drop if 10s pass between body chunks (Default: null / disabled)
+    // Drop if 10s pass between body chunks (Default: null or disabled)
     ->withBodyTimeout(10.0)    
     
-    // Hard 60s absolute limit for the whole request (Default: null / disabled)
+    // Hard 60s absolute limit for the whole request (Default: null or disabled)
     ->withRequestTimeout(60.0) 
 ```
 
@@ -762,10 +767,10 @@ HttpServer::create()
 
 ```php
 HttpServer::create()
-    // Close idle connections after 5s (Default: null / disabled)
+    // Close idle connections after 5s (Default: null or disabled)
     ->withKeepAliveTimeout(5.0)       
     
-    // Force reconnect after 100 requests (Default: null / unlimited)
+    // Force reconnect after 100 requests (Default: null or unlimited)
     ->withKeepAliveMaxRequests(100)   
     
     // Set the HTTP/1.1 Pipelining depth queue (Default: 128)
@@ -863,7 +868,7 @@ HttpServer::create('127.0.0.1:8000')
     ->withCluster(4)
     ->onError(function (\Throwable $e, Request $request) use ($logger) {
         // ERROR: The Parallel library cannot serialize the $logger file resource
-        // to send it to the child workers! This will throw a TaskPayloadException.
+        // to send it to the child workers. This will throw a TaskPayloadException.
         $logger->log($e->getMessage());
     })
     ->start();
@@ -883,7 +888,7 @@ HttpServer::create('127.0.0.1:8000')
         $workerLogger = new FileLogger('/var/log/app.log');
     })
     ->onError(function (\Throwable $e, Request $request) {
-        // Safe to serialize: captures no external scope!
+        // Safe to serialize: captures no external scope
         global $workerLogger;
         $workerLogger->log($e->getMessage());
         return Response::plaintext('Internal Error', 500);
