@@ -8,7 +8,7 @@ unopinionated, meaning there is no built-in router, middleware pipeline, or PSR-
 gives you raw speed, asynchronous non-blocking I/O, multi-core clustering, and absolute control
 over the HTTP request/response lifecycle.
 
-> **The Hibla Ecosystem:** This library is a core component of the broader [Hibla Ecosystem](https://github.com/hiblaphp/hibla). For advanced information on the underlying asynchronous primitives, check out the documentation for the [Socket](https://github.com/hiblaphp/socket), [Stream](https://github.com/hiblaphp/stream), and [Promise](https://github.com/hiblaphp/promise) libraries. Understanding Promise Cancellation is especially useful for building highly resilient, resource-efficient servers.
+> **The Hibla Ecosystem:** This library is a core component of the broader [Hibla Ecosystem](https://github.com/hiblaphp/hibla). For advanced information on the underlying asynchronous primitives, check out the documentation for the [Socket](https://github.com/hiblaphp/socket), [Stream](https://github.com/hiblaphp/stream), [Promise](https://github.com/hiblaphp/promise), and [Cancellation](https://github.com/hiblaphp/cancellation) libraries.
 
 [![Latest Release](https://img.shields.io/github/release/hiblaphp/http-server.svg?style=flat-square)](https://github.com/hiblaphp/http-server/releases)
 [![Tests](https://github.com/hiblaphp/http-server/actions/workflows/test.yml/badge.svg)](https://github.com/hiblaphp/http-server/actions/workflows/test.yml)
@@ -19,15 +19,36 @@ over the HTTP request/response lifecycle.
 
 ## Contents
 
-**Getting started**
-- [Installation](#installation)
-- [Quick start](#quick-start)
+**Overview**
 - [Design Philosophy](#design-philosophy)
 - [Production Deployment (Reverse Proxies)](#production-deployment-reverse-proxies)
+
+**Getting Started**
+- [Installation](#installation)
+- [Quick Start](#quick-start)
 - [Streaming-by-Default Architecture](#streaming-by-default-architecture)
+- [CRITICAL: The Golden Rule (Never Block)](#critical-the-golden-rule-never-block)
+- [The Function Coloring Solution](#the-function-coloring-solution)
+
+**Handling a Request**
+- [Asynchronous Execution (Where can I await?)](#asynchronous-execution-where-can-i-await)
+- [The Request Object](#the-request-object)
+- [Body Parsing (JSON, Buffered)](#body-parsing)
+- [The 100-Continue Handshake](#the-100-continue-handshake)
+- [Multipart & Upload Handling](#multipart--upload-handling)
+  - [Option A: Auto-Buffered Disk Uploads](#option-a-auto-buffered-disk-uploads)
+  - [Option B: Zero-Disk Async Streaming](#option-b-zero-disk-async-streaming)
+- [The `MultipartForm` Value Object](#the-multipartform-value-object)
+- [The Response Object](#the-response-object)
+- [Response Factories](#response-factories)
+- [Serving Static Files](#serving-static-files)
+- [Server-Sent Events (SSE)](#server-sent-events-sse)
+- [Protocol Upgrades (WebSockets)](#protocol-upgrades-websockets)
+- [Error Handling](#error-handling)
+- [Lifecycle Hooks](#lifecycle-hooks)
 
 **Server Configuration**
-- [The fluent builder](#the-fluent-builder)
+- [The Fluent Builder](#the-fluent-builder)
 - [Security & Limits](#security--limits)
 - [Timeouts & Slowloris Protection](#timeouts--slowloris-protection)
 - [Graceful Shutdown](#graceful-shutdown)
@@ -36,49 +57,19 @@ over the HTTP request/response lifecycle.
 - [HTTPS / TLS](#https--tls)
 - [Custom Sockets & Testing](#custom-sockets--testing)
 
-**Protocol-Level Security Hardening**
+**Scaling: Clustered Mode (Multi-core)**
+- [How Clustering Works](#how-clustering-works)
+- [The Serialization Trap (Dos & Don'ts)](#the-serialization-trap-dos--donts)
+- [Cluster Options & IPC](#cluster-options--ipc)
+
+**Hardening & Low-Level Reference**
 - [Request Smuggling Defenses](#request-smuggling-defenses)
 - [Slowloris & Trickle-Attack Protection](#slowloris--trickle-attack-protection)
 - [Upload & Multipart Hardening](#upload--multipart-hardening)
 - [Response Header Injection Guard](#response-header-injection-guard)
-
-**Handling Requests**
-- [Asynchronous Execution (Where can I await?)](#asynchronous-execution-where-can-i-await)
-- [CRITICAL: The Golden Rule (Never Block)](#critical-the-golden-rule-never-block)
-- [The Request Object](#the-request-object)
-- [Body parsing (JSON, Buffered)](#body-parsing)
-- [The 100-Continue Handshake](#the-100-continue-handshake)
-- [Multipart & Upload Handling](#multipart--upload-handling)
-  - [Option A: Auto-Buffered Disk Uploads](#option-a-auto-buffered-disk-uploads)
-  - [Option B: Zero-Disk Async Streaming](#option-b-zero-disk-async-streaming)
-- [The `MultipartForm` Value Object](#the-multipartform-value-object)
-
-**Sending Responses**
-- [The Response Object](#the-response-object)
-- [Response Factories](#response-factories)
-- [Serving Static Files](#serving-static-files)
-- [Server-Sent Events (SSE)](#server-sent-events-sse)
-- [Protocol Upgrades (WebSockets)](#protocol-upgrades-websockets)
-
-**Error Handling**
-- [Exception Hierarchy](#exception-hierarchy)
-- [`onError` Behavior](#onerror-behavior)
-
-**Advanced Low-Level Control**
 - [The `ProtocolHandlerInterface`](#the-protocolhandlerinterface)
 - [Manual Connection Throttling (Backpressure)](#manual-connection-throttling-backpressure)
 - [Hijacking the Connection (Socket Detachment)](#hijacking-the-connection-socket-detachment)
-
-**Lifecycle Hooks**
-- [`onRequest`](#onrequest)
-- [`onError`](#onerror)
-- [`onClientDisconnect` & Promise Cancellation](#onclientdisconnect--promise-cancellation)
-- [`onStart`](#onstart)
-
-**Clustered Mode (Multi-core)**
-- [How Clustering Works](#how-clustering-works)
-- [The Serialization Trap (Dos & Don'ts)](#the-serialization-trap-dos--donts)
-- [Cluster Options & IPC](#cluster-options--ipc)
 
 **API Reference**
 - [`HttpServerInterface`](#httpserverinterface-api)
@@ -97,6 +88,35 @@ over the HTTP request/response lifecycle.
 
 ---
 
+# Overview
+
+## Design Philosophy
+
+This library is built like Node.js's `node:http` or Golang's `net/http` module. It operates as a
+strictly-scoped protocol engine.
+
+1. **No Routing/Middleware:** Use this library to build your own router or wrap it in a PSR-7
+   adapter.
+2. **Strict RFC Compliance:** Defends against Request Smuggling (TE.TE/TE.CL), malformed headers,
+   and protocol downgrade attacks (RFC 9110/9112/9931 compliant).
+3. **Async-First:** Every request handler is executed inside an isolated Fiber. You can `await()`
+   database queries, HTTP calls, or `sleep()` without blocking the server from accepting thousands
+   of other concurrent connections.
+
+## Production Deployment (Reverse Proxies)
+
+While the HTTP Server is highly secure and capable of binding directly to a public port, **it is highly recommended to run this server behind a reverse proxy** like Nginx, Caddy, or HAProxy in production environments.
+
+Using a reverse proxy provides several architectural advantages:
+1. **Privilege Dropping:** It allows your PHP server to run safely on an unprivileged high port (like 8000) while the proxy binds to port 80 and 443 as root.
+2. **Protocol Translation (HTTP/2 & HTTP/3):** The HTTP Server natively speaks HTTP/1.1. Native HTTP/2 support is planned for a future release. However, proxies can accept HTTP/2 and HTTP/3 connections from the public internet and effortlessly translate them to HTTP/1.1 for your PHP backend, giving you immediate performance and multiplexing benefits.
+3. **SSL/TLS Termination:** Proxies are deeply optimized for SSL handshakes and certificate management.
+4. **Static Asset Serving:** Proxies can serve your static CSS, JS, and image files instantly without waking up the PHP runtime.
+
+---
+
+# Getting Started
+
 ## Installation
 
 > This package is currently in **beta**. Before installing, ensure your `composer.json` allows
@@ -108,12 +128,10 @@ composer require hiblaphp/http-server
 
 **Requirements:**
 - PHP 8.4+ (the library relies on native PHP Fibers and PHP 8.4 property hooks / asymmetric visibility).
-- The pcntl and posix extensions are required to support signal handling and graceful shutdown.
-- The proc_open function must be enabled in your php.ini if you intend to use multi-core clustering.
+- The `pcntl` and `posix` extensions are required to support signal handling and graceful shutdown.
+- The `proc_open` function must be enabled in your `php.ini` if you intend to use multi-core clustering.
 
----
-
-## Quick start
+## Quick Start
 
 ```php
 use Hibla\HttpServer\HttpServer;
@@ -135,35 +153,6 @@ HttpServer::create('127.0.0.1:8000')
     })
     ->start();
 ```
-
----
-
-## Design Philosophy
-
-This library is built like Node.js's `node:http` or Golang's `net/http` module. It operates as a
-strictly-scoped protocol engine.
-
-1. **No Routing/Middleware:** Use this library to build your own router or wrap it in a PSR-7
-   adapter.
-2. **Strict RFC Compliance:** Defends against Request Smuggling (TE.TE/TE.CL), malformed headers,
-   and protocol downgrade attacks (RFC 9110/9112/9931 compliant).
-3. **Async-First:** Every request handler is executed inside an isolated Fiber. You can `await()`
-   database queries, HTTP calls, or `sleep()` without blocking the server from accepting thousands
-   of other concurrent connections.
-
----
-
-## Production Deployment (Reverse Proxies)
-
-While the HTTP Server is highly secure and capable of binding directly to a public port, **it is highly recommended to run this server behind a reverse proxy** like Nginx, Caddy, or HAProxy in production environments.
-
-Using a reverse proxy provides several architectural advantages:
-1. **Privilege Dropping:** It allows your PHP server to run safely on an unprivileged high port (like 8000) while the proxy binds to port 80 and 443 as root.
-2. **Protocol Translation (HTTP/2 & HTTP/3):** The HTTP Server natively speaks HTTP/1.1. Native HTTP/2 support is planned for a future release. However, proxies can accept HTTP/2 and HTTP/3 connections from the public internet and effortlessly translate them to HTTP/1.1 for your PHP backend, giving you immediate performance and multiplexing benefits.
-3. **SSL/TLS Termination:** Proxies are deeply optimized for SSL handshakes and certificate management.
-4. **Static Asset Serving:** Proxies can serve your static CSS, JS, and image files instantly without waking up the PHP runtime.
-
----
 
 ## Streaming-by-Default Architecture
 
@@ -211,201 +200,11 @@ $form = await($request->getParsedBody());
 Using these helpers gives you the simplicity of synchronous-looking code with the memory safety
 and speed of a non-blocking streaming engine. Cancelling any of these returned promises mid-stream will instantly cleanly abort the transfer and free up resources.
 
----
+## CRITICAL: The Golden Rule (Never Block)
 
-## Server Configuration
+Because the Hibla Event Loop runs on a single thread utilizing cooperative multitasking, **you must never use standard PHP blocking functions.** Furthermore, calling `await()` in the global scope (outside of an `async()` wrapper or a built-in server hook) will cause it to fall back to sequentially blocking the entire thread.
 
-### The fluent builder
-
-`HttpServer::create()` returns an immutable fluent builder. Every configuration method returns a
-**new cloned instance**, so you can safely chain configuration methods to build your ideal server
-state before calling `->start()`.
-
-### Security & Limits
-
-Protect your server from memory exhaustion and abuse:
-
-```php
-HttpServer::create()
-    ->withMaxConnections(limit: 10000, pauseOnLimit: true) // Backpressure control
-    ->withMaxBodySize(15 * 1024 * 1024)                    // 15MB max request body
-    ->withHeaderLimits(maxSize: 8192, maxCount: 100)       // Prevent header bloat
-    ->withMultipartLimits(maxFiles: 20, maxFields: 1000)   // Prevent hash collisions
-```
-
-The `pauseOnLimit` flag in `withMaxConnections` controls what happens once the connection cap is hit. Passing `true` applies backpressure at the OS level so new connections wait, while `false` accepts and
-immediately drops connections past the limit.
-
-### Timeouts & Slowloris Protection
-
-Drop connections that are intentionally trickling data to tie up your sockets. All of these timeout features are disabled (`null`) by default to accommodate long-running streams, unless explicitly configured:
-
-```php
-HttpServer::create()
-    // Drop if headers take > 5s (Default: null / disabled)
-    ->withHeaderTimeout(5.0)   
-    
-    // Drop if 10s pass between body chunks (Default: null / disabled)
-    ->withBodyTimeout(10.0)    
-    
-    // Hard 60s absolute limit for the whole request (Default: null / disabled)
-    ->withRequestTimeout(60.0) 
-```
-
-### Graceful Shutdown
-
-When the server receives a termination signal (`SIGINT` or `SIGTERM`) during deployments or scaling events, it does not abruptly sever active user connections. Instead, the server stops accepting new connections and waits for all currently executing requests to finish cleanly.
-
-You can configure the absolute maximum time the server will wait for active requests to finish before it forcefully exits:
-
-```php
-HttpServer::create()
-    // Max time to drain requests on SIGTERM (Default: 15.0 seconds)
-    ->withGracefulShutdownTimeout(15.0) 
-```
-
-### Connection Persistence (Keep-Alive)
-
-```php
-HttpServer::create()
-    // Close idle connections after 5s (Default: null / disabled)
-    ->withKeepAliveTimeout(5.0)       
-    
-    // Force reconnect after 100 requests (Default: null / unlimited)
-    ->withKeepAliveMaxRequests(100)   
-    
-    // Set the HTTP/1.1 Pipelining depth queue (Default: 128)
-    ->withMaxConcurrentRequestsPerConnection(128) 
-```
-
-> **Important Proxy Configuration Note:**
-> If you are running this HTTP Server behind a reverse proxy like Nginx or HAProxy, you must ensure that your `withKeepAliveTimeout()` value is **strictly greater** than the proxy's configured keep-alive timeout. 
-> 
-> If the PHP server closes the connection before the proxy expects it to, the proxy will encounter a closed socket when attempting to forward the next user's request. This race condition results in intermittent `502 Bad Gateway` errors in production. Let the proxy manage the idle timeouts, and set the PHP server timeout slightly higher as a safety net.
-
-### HTTP/1.1 Pipelining
-
-The HTTP Server supports HTTP/1.1 request pipelining out of the box. Multiple requests can arrive on the
-same connection before earlier ones have finished, and each is processed concurrently in its own
-Fiber. Responses are flushed back to the client **strictly in the order the requests were
-received** per RFC 9112. The server queues completed responses internally and only writes them once
-every earlier response in the pipeline is ready. Calling `withMaxConcurrentRequestsPerConnection()`
-bounds how deep that queue is allowed to grow per connection before the socket is paused.
-
-### HTTPS / TLS
-
-```php
-HttpServer::create('0.0.0.0:443')
-    ->withTls([
-        'local_cert' => '/path/to/cert.pem',
-        'local_pk'   => '/path/to/key.pem',
-    ])
-```
-
-TLS metadata (negotiated protocol, cipher, and client certificate subject if mutual TLS is used)
-is exposed on `$request->serverParams` as `SSL_PROTOCOL`, `SSL_CIPHER`, and
-`SSL_CLIENT_CERT_SUBJECT`.
-
-### Custom Sockets & Testing
-
-For unit/integration testing, or to plug in an already-configured transport, you can inject your own
-socket server directly. This bypasses `withCluster()`, single-process binding, and TLS
-configuration, giving you complete ownership of the socket lifecycle:
-
-```php
-use Hibla\Socket\SocketServer;
-
-$socket = new SocketServer('127.0.0.1:0'); // ephemeral port, useful in tests
-
-HttpServer::create()
-    ->withSocketServer($socket)
-    ->onRequest(fn ($req) => Response::plaintext('ok'))
-    ->start();
-```
-
-Calling `withContext(array $context)` merges recursively into any existing context on each call
-(`array_merge_recursive`), so successive calls accumulate rather than replace. This is useful for
-composing TCP-level options (e.g. `so_reuseport`) alongside TLS options.
-
----
-
-## Protocol-Level Security Hardening
-
-These protections are always active, and there is nothing to opt into.
-
-### Request Smuggling Defenses
-
-The protocol parser enforces RFC 9112 framing rules that specifically close known
-request-smuggling vectors:
-
-- Rejects requests carrying **both** `Content-Length` and `Transfer-Encoding` (CL.TE/TE.CL).
-- Rejects a `chunked` coding that appears anywhere **except last** in a `Transfer-Encoding` chain
-  (TE.TE).
-- Rejects duplicate or conflicting `Content-Length` values, including comma-separated lists.
-- Rejects malformed `Content-Length` values (e.g. `"10abc"`, `"-5"`) instead of silently coercing
-  them with a numeric cast.
-- Forces connection closure whenever an HTTP/1.0 request carries `Transfer-Encoding` at all, since
-  no compliant 1.0 sender should ever produce one.
-- Enforces the HTTP `token` grammar on both the request method and every header field name,
-  rejecting control characters and delimiter characters that a lenient upstream proxy might
-  normalize differently.
-- Rejects obsolete line folding (`obs-fold`) and bare `CR` characters not followed by `LF`
-  anywhere in the request line or header block.
-- A rejected `CONNECT` request (4xx/5xx) forces the connection closed immediately after the
-  response, ensuring optimistically-pipelined bytes can never be misread as a new request.
-
-### Slowloris & Trickle-Attack Protection
-
-- `headerTimeout` bounds how long a client may take to finish sending headers.
-- `bodyTimeout` bounds inactivity between body chunks, protecting long uploads from stalling
-  attackers without punishing genuinely slow connections.
-- `requestTimeout` bounds the entire request (headers + body) end-to-end.
-- Header block size is capped (`maxHeaderSize`, default 16 KiB) even before the terminating
-  `\r\n\r\n` is seen. This prevents memory exhaustion from clients that never finish their headers.
-- Chunk-size lines in chunked transfer encoding are capped at 1 KiB to prevent unbounded buffer
-  growth from a chunk-size line with no terminating CRLF.
-
-### Upload & Multipart Hardening
-
-- Multipart parts are structurally validated against RFC 7578 §4.2. Parts without
-  `Content-Disposition: form-data` are parsed to keep boundary tracking correct, but they are never
-  surfaced as a field or file.
-- **Client-supplied filenames are sanitized to a bare leaf name** before being exposed as
-  `UploadedFile::$clientFilename`. Both POSIX (`../../etc/evil.txt`, `/etc/passwd`) and
-  Windows-style (`C:\evil.txt`) path separators are stripped. Never trust this value as a
-  storage path regardless.
-- `withMultipartLimits()` caps both file count and field count per request to prevent
-  file-bombing and hash-collision attacks against your form-processing code.
-- Individual multipart header blocks are capped independently of the outer HTTP header limit.
-
-### Response Header Injection Guard
-
-If your application code sets a response header value containing a raw `\r`, `\n`, or `\0`, the HTTP Server
-throws an `InvalidResponseException` rather than writing it to the wire. This prevents HTTP
-response splitting from user-controlled header values and surfaces the bug to you immediately
-instead of silently corrupting the response stream.
-
----
-
-## Handling Requests
-
-### Asynchronous Execution (Where can I await?)
-
-Because this library is built on native PHP Fibers, several callbacks execute completely implicitly inside their own isolated Fiber. In these contexts, you can freely use `await()` to perform asynchronous non-blocking operations without stalling the main event loop.
-
-You can safely `await()` inside:
-1. The `$server->onRequest()` callback.
-2. The `$server->onError()` callback.
-3. The `$server->onClientDisconnect()` callback (and `$request->onClientDisconnect()`).
-4. The `onFile` and `onField` callbacks provided to `$request->streamMultipart()`.
-5. The callback provided to `Response::sse()`.
-6. The `onUpgrade` callback provided to `Response::upgrade()`.
-
-### CRITICAL: The Golden Rule (Never Block)
-
-Because the Hibla Event Loop runs on a single thread utilizing cooperative multitasking, **you must never use standard PHP blocking functions.** 
-
-If you use a blocking function, the entire OS thread halts. The server will completely freeze and will not be able to accept new connections, read TCP data, or resume other Fibers until that blocking function finishes. You must always use the non-blocking async equivalents provided by the Hibla ecosystem.
+If you block the thread, the entire server halts. The server will completely freeze and will not be able to accept new connections, read TCP data, or resume other Fibers until that blocking function finishes. You must always use the non-blocking async equivalents provided by the Hibla ecosystem.
 
 **THE WRONG WAY (Will freeze the entire server):**
 ```php
@@ -431,15 +230,150 @@ $server->onRequest(function (Request $request) {
     // The server instantly switches to serving other connected users.
     await(\Hibla\delay(2.0)); 
     
-    // SAFE: Use the async HTTP client from the Hibla ecosystem.
+    // SAFE: Use the async i/o from the Hibla ecosystem.
     $response = await(\Hibla\HttpClient\Http::get('https://api.example.com/data'));
+    $database = await(\Hibla\QueryBuilder\DB::table("users")->get());
     
-    return Response::plaintext($response->body());
+    return Response::json([
+        $response->body(),
+       'data' => $database
+    ]);
 });
 ```
-> If you really need to execute a blocking call without stalling the event-loop, you can use Hibla Parallel to offload blocking task to worker process, or use a dedicated non blocking queue library.
+---
 
-### The Request Object
+## The Function Coloring Solution
+
+In many asynchronous programming languages, a function is considered "colored" if it internally yields execution. Colored functions must return a wrapper object (such as a Promise) and must be explicitly called using asynchronous keywords.
+
+Because PHP Fibers utilize a **dynamic call stack** rather than compile-time lexical scope, Hibla completely bypasses this limitation.
+
+### Dynamic Call Stack Preservation
+
+The reason this works comes down to one core distinction: PHP Fibers are **stackful coroutines**, unlike the coroutine models in JavaScript, Python, or even PHP's own Generators, all of which are **stackless**.
+
+A stackless coroutine can only suspend from the exact function that was declared as a coroutine (an `async function` in JS/Python, or a `function` containing `yield` in PHP Generators). The moment execution passes into a plain, ordinary helper function that wasn't itself declared that way, that helper has no mechanism to suspend. This is precisely why those languages need function coloring: every function on the path between the entrypoint and the `await` has to be explicitly marked and rewritten to propagate suspension up through the call chain.
+
+A stackful coroutine, by contrast, carries its own independent call stack, the same way an OS thread does. When the HTTP Server starts your `onRequest` handler inside a Fiber, that Fiber's stack grows and shrinks exactly like a normal PHP call stack. The whole stack can be suspended and resumed as one unit from anywhere within it, no matter how many ordinary synchonous function calls deep you are. Nested functions, closures, class constructors, and helper methods don't need to know they're running inside a Fiber, and don't need any special declaration to participate in suspension.
+
+This means Fiber context flows naturally downwards. You can call `await()` deeply nested inside standard PHP functions without wrapping them in `async()` or altering their signatures to return Promises.
+
+```php
+use Hibla\HttpServer\HttpServer;
+use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
+use function Hibla\await;
+use function Hibla\delay;
+use function Hibla\inFiber;
+
+// Deeply nested helper function
+function taskInsideNestedCallback(): void {
+    // Returns true because the server started the Fiber at the root onRequest handler
+    echo inFiber() 
+        ? "The deeply nested task is in a Fiber context\n" 
+        : "The deeply nested task is not in a Fiber context\n";
+}
+
+// Plain, standard PHP function with no "color"
+function main(): bool {
+    await(delay(0.05));
+    taskInsideNestedCallback();
+    return inFiber();
+}
+
+$server = HttpServer::create('127.0.0.1:8080')
+    ->onRequest(function (Request $request) {
+        if (main()) {
+            echo "The main orchestrator function is in a Fiber\n";
+        }
+        return Response::plaintext("Hello");
+    });
+```
+
+Because of this design, you do not have to pollute your code with `async` declarations. You can write clean, synchronous-looking PHP functions using traditional Object-Oriented patterns (like Dependency Injection and Event Listeners). If a deeply nested service needs to hit the database, it simply calls `await()` and the entire call stack safely pauses.
+
+### The Asynchronous Boundary Trap (And How to Bridge It)
+
+While Fibers flow infinitely downward through synchronous code (functions, closures, and constructors, and magic methods), **the Fiber context is lost the moment execution crosses an asynchronous boundary.**
+
+When you hand a callback directly to the Event Loop (`Loop::nextTick`, `Loop::addTimer`) or to an asynchronous Promise combinator that takes a callback (`Promise::map`, `Promise::forEach`), that callback is *not* executed immediately on your current stack. It is stored in memory and executed later by the Event Loop directly on the main thread (`{main}`).
+
+If a callback runs on `{main}` and attempts to call `await()`, it will trigger a **blocking fallback** that freezes your entire server, destroying concurrency.
+
+#### The Wrong Way:
+```php
+await(
+    Promise::map(["hello", "world"], function ($item) {
+        // DANGER: Promise::map executes this closure later on {main}, outside a Fiber!
+        // Calling await() here will BLOCK the entire server event loop!
+        await(delay(0.01)); 
+        return strtoupper($item);
+    })
+);
+```
+
+#### The Right Way (`asyncFn`):
+To bridge this boundary and ensure your callbacks run safely and non-blockingly, you must explicitly spawn a new Fiber for each callback. Hibla provides `async()` and `asyncFn()` helpers exactly for this purpose.
+
+```php
+use function Hibla\asyncFn;
+
+await(
+    Promise::map(["hello", "world"], asyncFn(function ($item) {
+        // SAFE: asyncFn() spawns a new dedicated Fiber for this closure.
+        // await() will safely suspend this specific Fiber without blocking the server.
+        await(delay(0.01)); 
+        return strtoupper($item);
+    }))
+);
+```
+
+### Callsite Concurrency
+
+You only need to introduce the `async()` wrapper at the **callsite** when you explicitly want to run plain functions concurrently, or when passing closures to async arrays and combinators.
+
+```php
+use function Hibla\async;
+use function Hibla\await;
+use Hibla\Promise\Promise;
+use Hibla\QueryBuilder\DB;
+
+function fetchUserData(int $id): array
+{
+   $userData = await(DB::table("users")->where('id', '=', $id)->get());
+}
+
+$server->onRequest(function (Request $request) {
+    // Wrap plain functions in async() only when you need to run them concurrently!
+    $user1Promise = async(fn() => fetchUserData(42));
+    $user2Promise = async(fn() => fetchUserData(99));
+
+    // Resolve both concurrently
+    [$user1, $user2] = await(Promise::all([$user1Promise, $user2Promise]));
+
+    return Response::json([$user1, $user2]);
+});
+```
+
+Using this architecture, your core domain services, helpers, and business logic remain clean, uncolored, and easily testable, only introducing asynchronous promises at the callsite for concurrency control.
+
+---
+
+# Handling a Request
+
+## Asynchronous Execution (Where can I await?)
+
+Because this library is built on native PHP Fibers, several callbacks execute completely implicitly inside their own isolated Fiber. In these contexts, you can freely use `await()` to perform asynchronous non-blocking operations without stalling the main event loop.
+
+You can safely `await()` inside:
+1. The `$server->onRequest()` callback.
+2. The `$server->onError()` callback.
+3. The `$server->onClientDisconnect()` callback (and `$request->onClientDisconnect()`).
+4. The `onFile` and `onField` callbacks provided to `$request->streamMultipart()`.
+5. The callback provided to `Response::sse()`.
+6. The `onUpgrade` callback provided to `Response::upgrade()`.
+
+## The Request Object
 
 The `Request` object represents an incoming HTTP request.
 
@@ -452,15 +386,7 @@ $version = $request->protocolVersion; // e.g. "1.1"
 $token = $request->getHeaderLine('Authorization');
 ```
 
-### The 100-Continue Handshake
-
-If a client sends `Expect: 100-continue`, the server automatically writes `HTTP/1.1 100 Continue` back
-the moment your handler starts reading the body. This happens the first time something attaches a `data`
-listener to `$request->body`, or the first time you `await()` one of the buffered body helpers.
-You do not need to detect or respond to the `Expect` header yourself. If you never read the body,
-no 100-Continue is ever sent.
-
-### Body parsing
+## Body Parsing
 
 ```php
 // Buffers the entire body into memory, rejecting with PayloadTooLargeException
@@ -474,7 +400,13 @@ $largeRaw = await($request->getBufferedBody(maxBytes: 50 * 1024 * 1024));
 $data = await($request->getJson());
 ```
 
----
+## The 100-Continue Handshake
+
+If a client sends `Expect: 100-continue`, the server automatically writes `HTTP/1.1 100 Continue` back
+the moment your handler starts reading the body. This happens the first time something attaches a `data`
+listener to `$request->body`, or the first time you `await()` one of the buffered body helpers.
+You do not need to detect or respond to the `Expect` header yourself. If you never read the body,
+no 100-Continue is ever sent.
 
 ## Multipart & Upload Handling
 
@@ -520,8 +452,6 @@ To prevent disk leakages, **the HTTP Server cleans up after itself.** If an `Upl
 of scope and is garbage collected without you calling `moveTo()`, the underlying temporary file is
 **automatically and instantly deleted** from your disk.
 
----
-
 ### Option B: Zero-Disk Async Streaming
 
 This is the ultimate high-performance model. If you are uploading massive files (e.g. 5GB video
@@ -556,9 +486,7 @@ await($request->streamMultipart(
 
 > **Note:** `streamMultipart()` actively enforces the exact same file and field limits configured via `withMultipartLimits()` to protect your server from resource exhaustion and hash collision attacks, completely mirroring the safety of the buffered `getParsedBody()` approach.
 
----
-
-### The `MultipartForm` Value Object
+## The `MultipartForm` Value Object
 
 Returned by `getParsedBody()`. Per RFC 7578 §5.2, **fields with duplicate names are never
 coalesced**. Every submitted value is retained in submission order. Files sharing the same field
@@ -577,9 +505,7 @@ $form->all();             // array<string, list<string>> of every field
 > `_charset_` field). No mainstream browser does either, since modern browsers submit UTF-8
 > regardless of page encoding. If you expect a non-UTF-8 charset, decode explicitly with a tool like `mb_convert_encoding()`.
 
----
-
-## Sending Responses
+## The Response Object
 
 The `Response` object represents an outgoing HTTP response. It is a lightweight value object.
 
@@ -594,7 +520,7 @@ $response = new Response(
 );
 ```
 
-### Response Factories
+## Response Factories
 
 For standard workloads, always use the highly optimized factory methods:
 
@@ -607,7 +533,7 @@ return Response::redirect('/login', 302);
 
 If `$response->body` is set to any `Hibla\Stream\Interfaces\ReadableStreamInterface` instead of a string, the server automatically streams it out using chunked transfer encoding unless you have explicitly set a `Content-Length` header yourself.
 
-### Serving Static Files
+## Serving Static Files
 
 The server provides a highly optimized, asynchronous static file serving factory. It automatically:
 - Detects the file's `Content-Type` safely from its extension.
@@ -622,7 +548,7 @@ The server provides a highly optimized, asynchronous static file serving factory
 return Response::file('/var/www/public/video.mp4', $request);
 ```
 
-### Server-Sent Events (SSE)
+## Server-Sent Events (SSE)
 
 Real-time streaming is natively supported. The SSE factory automatically configures
 non-buffering headers (`Cache-Control: no-cache`, `X-Accel-Buffering: no`), keep-alive parameters,
@@ -650,7 +576,7 @@ Calling `$stream->ping($comment = 'ping')` emits a spec-compliant comment line (
 proxies and load balancers from timing out an idle connection. Both `send()` and `ping()`
 transparently suspend the emitter Fiber under TCP backpressure and resume once the client drains.
 
-### Protocol Upgrades (WebSockets)
+## Protocol Upgrades (WebSockets)
 
 For protocols like WebSockets or HTTP CONNECT tunneling, you can hijack the raw TCP connection
 entirely. Once you call `upgrade()`, the server detaches the socket from the HTTP loop and hands
@@ -670,8 +596,6 @@ return Response::upgrade(
     }
 );
 ```
-
----
 
 ## Error Handling
 
@@ -728,109 +652,6 @@ it. The connection is not reused for a following request, even if you do not ask
 explicitly. If your `onError` callback itself throws an exception, or returns something other than a `Response`
 or `null`, the server falls back to the generic 500 response rather than propagating the failure.
 
----
-
-## Advanced Low-Level Control
-
-### The `ProtocolHandlerInterface`
-
-For framework builders, the HTTP Server exposes the extreme low-level HTTP transport layer. Your
-`onRequest()` callback actually receives a second argument which is the `ProtocolHandlerInterface`.
-
-This interface is the actual state machine driving the raw TCP socket. Accessing it directly lets
-you bypass the standard request-response loop for advanced networking, debugging, or custom
-protocols.
-
-```php
-use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
-use Hibla\HttpServer\Message\Request;
-use Hibla\HttpServer\Message\Response;
-
-$server->onRequest(function (Request $request, ProtocolHandlerInterface $protocol) {
-    // 1. Inspect the underlying socket connection directly
-    $socket = $protocol->connection;
-    $remoteIp = $socket->getRemoteAddress();
-
-    // 2. Check active pipeline concurrency on this specific socket
-    $concurrentRequestsOnSocket = $protocol->activeRequestsCount;
-
-    // 3. Write responses with explicit event callbacks
-    $protocol->writeResponse(Response::plaintext('Direct Write'), function () {
-        // This callback is executed the exact millisecond the bytes leave the OS buffer!
-        echo "Response fully transmitted to client.\n";
-    });
-});
-```
-
-### Manual Connection Throttling (Backpressure)
-
-One of the major benefits of accessing the raw `$protocol->connection` is the ability to apply
-**manual backpressure** (TCP flow control). If a client is uploading a massive file or flooding
-the server with requests faster than your database or downstream consumers can process them, you
-can tell the OS kernel to stop reading packets from the TCP socket by calling `pause()`. Once your
-queue clears, call `resume()` to start reading again:
-
-```php
-$server->onRequest(function (Request $request, ProtocolHandlerInterface $protocol) {
-    $socket = $protocol->connection;
-
-    // Stop reading any new TCP packets from this client!
-    // The client's OS will buffer data locally (TCP Window saturation)
-    $socket->pause();
-
-    Hibla\async(function () use ($socket, $request) {
-        // Process a slow, database i/o task asynchronously
-        await(slowDatabaseWrite(await($request->getBufferedBody())));
-
-        // We are ready for more data. Tell the kernel to resume reading!
-        $socket->resume();
-    });
-
-    return Response::plaintext('Processed');
-});
-```
-
-### Hijacking the Connection (Socket Detachment)
-
-If you need to transition the socket into an entirely different protocol (such as WebSockets, SSH
-tunnelling, or custom binary framing), you can explicitly **detach** the protocol handler.
-
-Detaching stops all HTTP parsing, cancels any associated HTTP timeouts, and returns any unparsed
-bytes currently sitting in the receive buffer:
-
-```php
-$server->onRequest(function (Request $request, ProtocolHandlerInterface $protocol) {
-    if ($request->getHeaderLine('Upgrade') === 'my-custom-protocol') {
-
-        // Send the HTTP protocol switch response
-        $protocol->writeResponse(new Response(101, [
-            'Upgrade' => 'my-custom-protocol',
-            'Connection' => 'Upgrade'
-        ]));
-
-        // Hijack and detach!
-        $rawSocket = $protocol->connection;
-        $unparsedBytes = $protocol->detach(); // Cleans up and returns trailing bytes
-
-        // The HTTP server has completely forgotten about this socket.
-        // You are now writing raw TCP data:
-        if ($unparsedBytes !== '') {
-            processCustomFraming($unparsedBytes);
-        }
-
-        $rawSocket->on('data', function (string $chunk) use ($rawSocket) {
-            $rawSocket->write("Echo: " . $chunk);
-        });
-
-        return; // Return null so the server knows not to try to send a response
-    }
-
-    return Response::plaintext('Standard HTTP');
-});
-```
-
----
-
 ## Lifecycle Hooks
 
 ### `onRequest`
@@ -846,25 +667,34 @@ $server->onError(function (\Throwable $e, Request $request) {
 });
 ```
 
-### `onClientDisconnect` & Promise Cancellation
+### `onClientDisconnect` & Cancellation Tokens
 Triggered if the client drops the TCP connection before your `onRequest` handler has finished
-responding. Because Hibla is built on the `hiblaphp/promise` library, you can safely cancel long-running promises to save CPU cycles and database connections if a user abandons their request early.
+responding.
+
+Because the ecosystem is built heavily around structured concurrency, you can combine the `onClientDisconnect` event with a `CancellationTokenSource` to gracefully cancel long-running promises. This saves CPU cycles and database connections if a user abandons their request early.
 
 ```php
-$server->onRequest(function (Request $request) {
-    // Start a long running downstream API call or database query
-    $downstreamPromise = fetchAnalyticsDataAsync();
+use Hibla\Cancellation\CancellationTokenSource;
+use Hibla\Promise\Exceptions\CancelledException;
 
-    // If the user closes their browser tab, instantly cancel the query!
-    $request->onClientDisconnect(function () use ($downstreamPromise) {
-        $downstreamPromise->cancel();
+$server->onRequest(function (Request $request) {
+    // 1. Create a Cancellation Token Source
+    $cts = new CancellationTokenSource();
+
+    // 2. If the user closes their browser tab, trigger the cancellation!
+    $request->onClientDisconnect(function () use ($cts) {
+        $cts->cancel();
     });
 
     try {
-        $data = await($downstreamPromise);
+        // 3. Pass the token down to your async tasks. 
+        // If $cts->cancel() fires, the fetch operation instantly aborts.
+        $data = await(fetchAnalyticsDataAsync($cts->token));
         return Response::json($data);
-    } catch (\Hibla\Promise\Exceptions\CancelledException $e) {
+        
+    } catch (CancelledException $e) {
         // The promise was cancelled cleanly.
+        // Returning null instructs the server not to attempt sending a response.
         return null;
     }
 });
@@ -872,12 +702,128 @@ $server->onRequest(function (Request $request) {
 
 ### `onStart`
 Fired exactly once, right before the server binds to the socket and starts accepting connections.
-In clustered mode, this fires **inside each isolated worker subprocess**. See the
+In clustered mode, this fires inside each isolated worker subprocess. See the
 [Serialization Trap](#the-serialization-trap-dos--donts) below for why this matters.
 
 ---
 
-## Clustered Mode (Multi-core)
+# Server Configuration
+
+## The Fluent Builder
+
+`HttpServer::create()` returns an immutable fluent builder. Every configuration method returns a
+**new cloned instance**, so you can safely chain configuration methods to build your ideal server
+state before calling `->start()`.
+
+## Security & Limits
+
+Protect your server from memory exhaustion and abuse:
+
+```php
+HttpServer::create()
+    ->withMaxConnections(limit: 10000, pauseOnLimit: true) // Backpressure control
+    ->withMaxBodySize(15 * 1024 * 1024)                    // 15MB max request body
+    ->withHeaderLimits(maxSize: 8192, maxCount: 100)       // Prevent header bloat
+    ->withMultipartLimits(maxFiles: 20, maxFields: 1000)   // Prevent hash collisions
+```
+
+The `pauseOnLimit` flag in `withMaxConnections` controls what happens once the connection cap is hit. Passing `true` applies backpressure at the OS level so new connections wait, while `false` accepts and
+immediately drops connections past the limit.
+
+## Timeouts & Slowloris Protection
+
+Drop connections that are intentionally trickling data to tie up your sockets. All of these timeout features are disabled (`null`) by default to accommodate long-running streams, unless explicitly configured:
+
+```php
+HttpServer::create()
+    // Drop if headers take > 5s (Default: null / disabled)
+    ->withHeaderTimeout(5.0)   
+    
+    // Drop if 10s pass between body chunks (Default: null / disabled)
+    ->withBodyTimeout(10.0)    
+    
+    // Hard 60s absolute limit for the whole request (Default: null / disabled)
+    ->withRequestTimeout(60.0) 
+```
+
+## Graceful Shutdown
+
+When the server receives a termination signal (`SIGINT` or `SIGTERM`) during deployments or scaling events, it does not abruptly sever active user connections. Instead, the server stops accepting new connections and waits for all currently executing requests to finish cleanly.
+
+You can configure the absolute maximum time the server will wait for active requests to finish before it forcefully exits:
+
+```php
+HttpServer::create()
+    // Max time to drain requests on SIGTERM (Default: 15.0 seconds)
+    ->withGracefulShutdownTimeout(15.0) 
+```
+
+## Connection Persistence (Keep-Alive)
+
+```php
+HttpServer::create()
+    // Close idle connections after 5s (Default: null / disabled)
+    ->withKeepAliveTimeout(5.0)       
+    
+    // Force reconnect after 100 requests (Default: null / unlimited)
+    ->withKeepAliveMaxRequests(100)   
+    
+    // Set the HTTP/1.1 Pipelining depth queue (Default: 128)
+    ->withMaxConcurrentRequestsPerConnection(128) 
+```
+
+> **Important Proxy Configuration Note:**
+> If you are running this HTTP Server behind a reverse proxy like Nginx or HAProxy, you must ensure that your `withKeepAliveTimeout()` value is **strictly greater** than the proxy's configured keep-alive timeout.
+> 
+> If the PHP server closes the connection before the proxy expects it to, the proxy will encounter a closed socket when attempting to forward the next user's request. This race condition results in intermittent `502 Bad Gateway` errors in production. Let the proxy manage the idle timeouts, and set the PHP server timeout slightly higher as a safety net.
+
+## HTTP/1.1 Pipelining
+
+The HTTP Server supports HTTP/1.1 request pipelining out of the box. Multiple requests can arrive on the
+same connection before earlier ones have finished, and each is processed concurrently in its own
+Fiber. Responses are flushed back to the client **strictly in the order the requests were
+received** per RFC 9112. The server queues completed responses internally and only writes them once
+every earlier response in the pipeline is ready. Calling `withMaxConcurrentRequestsPerConnection()`
+bounds how deep that queue is allowed to grow per connection before the socket is paused.
+
+## HTTPS / TLS
+
+```php
+HttpServer::create('0.0.0.0:443')
+    ->withTls([
+        'local_cert' => '/path/to/cert.pem',
+        'local_pk'   => '/path/to/key.pem',
+    ])
+```
+
+TLS metadata (negotiated protocol, cipher, and client certificate subject if mutual TLS is used)
+is exposed on `$request->serverParams` as `SSL_PROTOCOL`, `SSL_CIPHER`, and
+`SSL_CLIENT_CERT_SUBJECT`.
+
+## Custom Sockets & Testing
+
+For unit/integration testing, or to plug in an already-configured transport, you can inject your own
+socket server directly. This bypasses `withCluster()`, single-process binding, and TLS
+configuration, giving you complete ownership of the socket lifecycle:
+
+```php
+use Hibla\Socket\SocketServer;
+
+$socket = new SocketServer('127.0.0.1:0'); // ephemeral port, useful in tests
+
+HttpServer::create()
+    ->withSocketServer($socket)
+    ->onRequest(fn ($req) => Response::plaintext('ok'))
+    ->start();
+```
+
+Calling `withContext(array $context)` merges recursively into any existing context on each call
+(`array_merge_recursive`), so successive calls accumulate rather than replace. This is useful for
+composing TCP-level options (e.g. `so_reuseport`) alongside TLS options.
+
+---
+
+# Scaling: Clustered Mode (Multi-core)
 
 Node.js and traditional PHP share a limitation in that an event loop only runs on a single CPU core.
 The HTTP Server solves this natively using `SO_REUSEPORT` and `hiblaphp/parallel`.
@@ -896,12 +842,13 @@ HttpServer::create('0.0.0.0:8000')
 > Clustering is **not supported on Windows** because there is no `SO_REUSEPORT` functionality. The HTTP Server detects this automatically
 > and falls back to single-process mode with a warning, rather than failing to start.
 
-### How Clustering Works
+## How Clustering Works
+
 When you call `withCluster(8)`, the Master process serializes your `onRequest`, `onError`, and
 `onClientDisconnect` closures, sends them over IPC pipes, and forks 8 child workers. The children
 deserialize those closures and run the actual HTTP servers.
 
-### The Serialization Trap (Dos & Don'ts)
+## The Serialization Trap (Dos & Don'ts)
 
 Because your closures are serialized and sent across process boundaries, **they cannot capture
 active OS resources** like open PDO database connections, File handles, or Redis clients from
@@ -947,7 +894,7 @@ HttpServer::create('127.0.0.1:8000')
 *Note: Framework builders can also use Dependency Injection containers or Static Facades
 initialized via `ClusterOptions::withClusterBootstrap()`, as static calls do not capture scope.*
 
-### Cluster Options & IPC
+## Cluster Options & IPC
 
 Pass a `ClusterOptions` object to configure worker environments and Inter-Process Communication
 (IPC):
@@ -978,9 +925,164 @@ If a worker dies unexpectedly, the Master automatically respawns a replacement w
 
 ---
 
-## API Reference
+# Hardening & Low-Level Reference
 
-### `HttpServerInterface` API
+These protections are always active, and there is nothing to opt into.
+
+## Request Smuggling Defenses
+
+The protocol parser enforces RFC 9112 framing rules that specifically close known
+request-smuggling vectors:
+
+- Rejects requests carrying **both** `Content-Length` and `Transfer-Encoding` (CL.TE/TE.CL).
+- Rejects a `chunked` coding that appears anywhere **except last** in a `Transfer-Encoding` chain
+  (TE.TE).
+- Rejects duplicate or conflicting `Content-Length` values, including comma-separated lists.
+- Rejects malformed `Content-Length` values (e.g. `"10abc"`, `"-5"`) instead of silently coercing
+  them with a numeric cast.
+- Forces connection closure whenever an HTTP/1.0 request carries `Transfer-Encoding` at all, since
+  no compliant 1.0 sender should ever produce one.
+- Enforces the HTTP `token` grammar on both the request method and every header field name,
+  rejecting control characters and delimiter characters that a lenient upstream proxy might
+  normalize differently.
+- Rejects obsolete line folding (`obs-fold`) and bare `CR` characters not followed by `LF`
+  anywhere in the request line or header block.
+- A rejected `CONNECT` request (4xx/5xx) forces the connection closed immediately after the
+  response, ensuring optimistically-pipelined bytes can never be misread as a new request.
+
+## Slowloris & Trickle-Attack Protection
+
+- `headerTimeout` bounds how long a client may take to finish sending headers.
+- `bodyTimeout` bounds inactivity between body chunks, protecting long uploads from stalling
+  attackers without punishing genuinely slow connections.
+- `requestTimeout` bounds the entire request (headers + body) end-to-end.
+- Header block size is capped (`maxHeaderSize`, default 16 KiB) even before the terminating
+  `\r\n\r\n` is seen. This prevents memory exhaustion from clients that never finish their headers.
+- Chunk-size lines in chunked transfer encoding are capped at 1 KiB to prevent unbounded buffer
+  growth from a chunk-size line with no terminating CRLF.
+
+## Upload & Multipart Hardening
+
+- Multipart parts are structurally validated against RFC 7578 §4.2. Parts without
+  `Content-Disposition: form-data` are parsed to keep boundary tracking correct, but they are never
+  surfaced as a field or file.
+- **Client-supplied filenames are sanitized to a bare leaf name** before being exposed as
+  `UploadedFile::$clientFilename`. Both POSIX (`../../etc/evil.txt`, `/etc/passwd`) and
+  Windows-style (`C:\evil.txt`) path separators are stripped. Never trust this value as a
+  storage path regardless.
+- `withMultipartLimits()` caps both file count and field count per request to prevent
+  file-bombing and hash-collision attacks against your form-processing code.
+- Individual multipart header blocks are capped independently of the outer HTTP header limit.
+
+## Response Header Injection Guard
+
+If your application code sets a response header value containing a raw `\r`, `\n`, or `\0`, the HTTP Server
+throws an `InvalidResponseException` rather than writing it to the wire. This prevents HTTP
+response splitting from user-controlled header values and surfaces the bug to you immediately
+instead of silently corrupting the response stream.
+
+## The `ProtocolHandlerInterface`
+
+For framework builders, the HTTP Server exposes the extreme low-level HTTP transport layer. Your
+`onRequest()` callback actually receives a second argument which is the `ProtocolHandlerInterface`.
+
+This interface is the actual state machine driving the raw TCP socket. Accessing it directly lets
+you bypass the standard request-response loop for advanced networking, debugging, or custom
+protocols.
+
+```php
+use Hibla\HttpServer\Interfaces\ProtocolHandlerInterface;
+use Hibla\HttpServer\Message\Request;
+use Hibla\HttpServer\Message\Response;
+
+$server->onRequest(function (Request $request, ProtocolHandlerInterface $protocol) {
+    // 1. Inspect the underlying socket connection directly
+    $socket = $protocol->connection;
+    $remoteIp = $socket->getRemoteAddress();
+
+    // 2. Check active pipeline concurrency on this specific socket
+    $concurrentRequestsOnSocket = $protocol->activeRequestsCount;
+
+    // 3. Write responses with explicit event callbacks
+    $protocol->writeResponse(Response::plaintext('Direct Write'), function () {
+        // This callback is executed the exact millisecond the bytes leave the OS buffer!
+        echo "Response fully transmitted to client.\n";
+    });
+});
+```
+
+## Manual Connection Throttling (Backpressure)
+
+One of the major benefits of accessing the raw `$protocol->connection` is the ability to apply
+**manual backpressure** (TCP flow control). If a client is uploading a massive file or flooding
+the server with requests faster than your database or downstream consumers can process them, you
+can tell the OS kernel to stop reading packets from the TCP socket by calling `pause()`. Once your
+queue clears, call `resume()` to start reading again:
+
+```php
+$server->onRequest(function (Request $request, ProtocolHandlerInterface $protocol) {
+    $socket = $protocol->connection;
+
+    // Stop reading any new TCP packets from this client!
+    // The client's OS will buffer data locally (TCP Window saturation)
+    $socket->pause();
+
+    Hibla\async(function () use ($socket, $request) {
+        // Process a slow, database i/o task asynchronously
+        await(slowDatabaseWrite(await($request->getBufferedBody())));
+
+        // We are ready for more data. Tell the kernel to resume reading!
+        $socket->resume();
+    });
+
+    return Response::plaintext('Processed');
+});
+```
+
+## Hijacking the Connection (Socket Detachment)
+
+If you need to transition the socket into an entirely different protocol (such as WebSockets, SSH
+tunnelling, or custom binary framing), you can explicitly **detach** the protocol handler.
+
+Detaching stops all HTTP parsing, cancels any associated HTTP timeouts, and returns any unparsed
+bytes currently sitting in the receive buffer:
+
+```php
+$server->onRequest(function (Request $request, ProtocolHandlerInterface $protocol) {
+    if ($request->getHeaderLine('Upgrade') === 'my-custom-protocol') {
+
+        // Send the HTTP protocol switch response
+        $protocol->writeResponse(new Response(101, [
+            'Upgrade' => 'my-custom-protocol',
+            'Connection' => 'Upgrade'
+        ]));
+
+        // Hijack and detach!
+        $rawSocket = $protocol->connection;
+        $unparsedBytes = $protocol->detach(); // Cleans up and returns trailing bytes
+
+        // The HTTP server has completely forgotten about this socket.
+        // You are now writing raw TCP data:
+        if ($unparsedBytes !== '') {
+            processCustomFraming($unparsedBytes);
+        }
+
+        $rawSocket->on('data', function (string $chunk) use ($rawSocket) {
+            $rawSocket->write("Echo: " . $chunk);
+        });
+
+        return; // Return null so the server knows not to try to send a response
+    }
+
+    return Response::plaintext('Standard HTTP');
+});
+```
+
+---
+
+# API Reference
+
+## `HttpServerInterface` API
 
 All fluent configuration methods return a new cloned instance of the server.
 
@@ -1010,9 +1112,7 @@ All fluent configuration methods return a new cloned instance of the server.
 | `onStart(callable $callback)` | `static` | Register a late-stage worker initialization callback. |
 | `start()` | `void` | Binds the sockets and starts the Event Loop (blocking). Throws `InvalidConfigurationException` if no handler is set. |
 
----
-
-### `ClusterOptions` API
+## `ClusterOptions` API
 
 | Method | Return Type | Description |
 |:---|:---|:---|
@@ -1022,9 +1122,7 @@ All fluent configuration methods return a new cloned instance of the server.
 | `withClusterBootstrap(string $file, ?callable $cb)`| `static` | Specify a bootstrap file to run before workers boot. |
 | `onWorkerMessage(callable $handler)` | `static` | Register an IPC handler to receive worker `emit()` payloads. |
 
----
-
-### `ProtocolHandlerInterface` API
+## `ProtocolHandlerInterface` API
 
 Exposed as the second argument to `onRequest()`. Controls raw TCP transport-to-HTTP mapping.
 
@@ -1037,9 +1135,7 @@ Exposed as the second argument to `onRequest()`. Controls raw TCP transport-to-H
 | `detach()` | `(): string` | Halts HTTP parsing and releases the raw socket. Returns unparsed buffer bytes. |
 | `gracefulShutdown()` | `(): void` | Signals the handler to cleanly finish and disconnect. |
 
----
-
-### `Request` API
+## `Request` API
 
 The value object representing an incoming HTTP Request.
 
@@ -1060,9 +1156,7 @@ The value object representing an incoming HTTP Request.
 | `onClientDisconnect`| `(callable $callback): static` | Register a callback to fire if the TCP socket drops early. |
 | `isDisconnected` | `(): bool` | Checks if the client has already disconnected. |
 
----
-
-### `Response` API
+## `Response` API
 
 The value object representing an outgoing HTTP Response.
 
@@ -1081,9 +1175,7 @@ The value object representing an outgoing HTTP Response.
 | `setHeader` | `(string $name, string\|array $val): void` | Overwrite or set a header. Throws `InvalidResponseException` on CR/LF/NUL in the value. |
 | `addHeader` | `(string $name, string\|array $val): void` | Append values onto an existing header. |
 
----
-
-### `SseStream` API
+## `SseStream` API
 
 Passed to the callback of `Response::sse()`. Implements `Hibla\Stream\Interfaces\ReadableStreamInterface`.
 
@@ -1095,9 +1187,7 @@ Passed to the callback of `Response::sse()`. Implements `Hibla\Stream\Interfaces
 | `close` | `(): void` | Forcefully closes the SSE stream. |
 | `end` | `(): void` | Ends the stream gracefully. |
 
----
-
-### `MultipartForm` API
+## `MultipartForm` API
 
 Returned by `Request::getParsedBody()`.
 
@@ -1109,9 +1199,7 @@ Returned by `Request::getParsedBody()`.
 | `getFiles` | `(string $name): list<UploadedFile>` | Every uploaded file for the field, in order (handles both `name` and `name[]`). |
 | `all` | `(): array<string, list<string>>` | Every field and its submitted values. |
 
----
-
-### `UploadedFile` API
+## `UploadedFile` API
 
 Represents a parsed file upload buffered asynchronously to your temp disk.
 
@@ -1123,9 +1211,7 @@ Represents a parsed file upload buffered asynchronously to your temp disk.
 | `$size` | `int` | **Property (Read-only)**. Total size of the uploaded file in bytes. |
 | `moveTo` | `(string $destinationPath): PromiseInterface<void>` | Asynchronously move the temporary file to its final target path. Throws `FileAlreadyMovedException` or `UploadedFileNotFoundException`. |
 
----
-
-### Exceptions Reference
+## Exceptions Reference
 
 All under `Hibla\HttpServer\Exceptions\`, all extend `HttpServerException` (a `RuntimeException`).
 
@@ -1148,6 +1234,8 @@ All under `Hibla\HttpServer\Exceptions\`, all extend `HttpServerException` (a `R
 | `StreamTransferException` | Destination closed before a stream transfer completed |  |
 
 ---
+
+# Meta
 
 ## Development
 
@@ -1176,8 +1264,6 @@ The codebase follows PSR-12 standards enforced by Laravel Pint.
 ```bash
 ./vendor/bin/pint
 ```
-
----
 
 ## License
 
