@@ -300,7 +300,7 @@ When you hand a callback directly to the Event Loop (`Loop::nextTick`, `Loop::ad
 
 If a callback runs on `{main}` and attempts to call `await()`, it normally triggers a **cooperative blocking fallback** that drives the event loop recursively until the promise settles. Inside a high-concurrency daemon like an HTTP server, this recursive loop re-entrancy wastes CPU cycles and degrades performance.
 
-To protect you from this, the HTTP Server automatically configures `hiblaphp/async` into **Strict Mode** at startup using `AsyncEnvironment::enableStrictAwait()` in top of your script entry point. 
+To protect you from this, In the `hiblaphp/async` which this library already installed by default,  put `AsyncEnvironment::enableStrictAwait()` in top of your script entry point to avoid silent blocking fallback. 
 
 With strict mode active, the "Wrong Way" code below will not silently degrade your performance. Instead, it will instantly throw an `InvalidContextException` pointing directly to the file and line in your code where the context was lost:
 
