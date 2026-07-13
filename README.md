@@ -910,7 +910,7 @@ use Hibla\HttpServer\ClusterOptions;
 $options = ClusterOptions::make()
     ->withWorkerMemoryLimit('256M')
     ->withWorkerRestartLimit(10) // Prevent fork-bomb crash loops
-    ->withClusterBootstrap('/path/to/autoload.php') // Preload legacy code
+    ->withClusterBootstrap('/path/to/bootstrap') // Preload bootstrap code like DI or service providers
     ->onWorkerMessage(function ($message) {
         // Receive messages emitted by workers to the Master process
         echo "Worker {$message->pid} says: {$message->data}\n";
